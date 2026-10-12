@@ -1,0 +1,5 @@
+# title: Fresh 2026
+# description: Everything released in 2026.
+# section: By year
+# created: 2026-10-10
+year: 2026
