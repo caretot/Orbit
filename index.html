@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-palette="gold">
+<html lang="en" data-theme="dark" data-palette="evergreen">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
-  <meta name="theme-color" content="#000000" />
+  <meta name="theme-color" content="#121212" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -11,17 +11,16 @@
   <meta name="description" content="Private music player for friends" />
   <meta property="og:title" content="ORBIT" />
   <meta property="og:description" content="Tap to listen" />
-  <meta property="og:type" content="website" />
   <title>ORBIT</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=1.2.0" />
   <script>
-    /* apply saved colours before the page paints (no flash) */
     try { var s = JSON.parse(localStorage.getItem('orbit.settings') || '{}'), m = s.mode || 'dark';
       if (m === 'system') m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-      document.documentElement.dataset.theme = m; if (s.palette) document.documentElement.dataset.palette = s.palette; } catch (e) {}
+      document.documentElement.dataset.theme = m;
+      if (s.palette && localStorage.getItem('orbit.palV2')) document.documentElement.dataset.palette = s.palette; } catch (e) {}
   </script>
 </head>
 <body>
@@ -31,7 +30,6 @@
     <section id="player" class="player hidden" aria-label="Now playing"></section>
     <nav id="tabbar" class="tabbar" aria-label="Main"></nav>
   </div>
-
   <section id="full" class="full" aria-hidden="true"></section>
   <div id="drawer-scrim" class="scrim"></div>
   <aside id="drawer" class="drawer" aria-hidden="true"></aside>
@@ -39,11 +37,9 @@
   <section id="sheet" class="sheet" aria-hidden="true"></section>
   <section id="overlay" class="overlay" aria-hidden="true"></section>
   <div id="toast" class="toast" role="status"></div>
-
   <audio id="audio" preload="auto" playsinline webkit-playsinline></audio>
-
-  <script src="config.js"></script>
+  <script src="config.js?v=1.2.0"></script>
   <script src="library.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=1.2.0"></script>
 </body>
 </html>

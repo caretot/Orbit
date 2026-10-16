@@ -4,7 +4,7 @@ name: Build & publish
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # full history -> real "date added" for each song
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -36,8 +36,8 @@ jobs:
       - name: Prepare site
         run: |
           mkdir _site
-          rsync -a --exclude '.git' --exclude '.github' --exclude '_site' --exclude '_src' --exclude 'deploy-workflow.yml' ./ _site/
-      - uses: actions/configure-pages@v5
+          rsync -a --exclude '.git' --exclude '.github' --exclude '_site' --exclude '_src' --exclude 'deploy-workflow.yml' --exclude '*.py' --exclude 'README.md' --exclude '_README.txt' ./ _site/
+          touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

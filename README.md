@@ -1,79 +1,83 @@
-# ORBIT: private music player for friends
+# ORBIT v1.2: private music player for friends
 
-A static music-streaming website. It runs entirely on GitHub Pages: no server, no accounts and no database.
-You upload the song files. Your friends open the link and listen.
+A static music website on GitHub Pages: no server and no accounts.
+**Upload this AAA folder to GitHub.** Keep the `PRIVATE` folder and `vault-maker.html` on your laptop only.
 
-## 1. Folder
+## 1. Song file names: all details come from the name
 
 ```
-AAA/
-├── index.html  styles.css  app.js  sw.js     the app (don't need to touch)
-├── config.js         ← app name, contact, about, terms, default colours  (EDIT)
-├── meta.csv          ← optional: album / genre / year per song           (EDIT)
-├── MUSIC/            ← song files
-├── COVERS/           ← cover images (same name as the song)
-├── LYR/              ← lyrics .txt (same name as the song)
-├── PLAYLISTS/        ← one .txt file = one playlist
-├── library.js        AUTO-GENERATED list of everything (never edit)
-├── build_library.py  generates library.js
-├── deploy-workflow.yml   visible copy of .github/workflows/deploy.yml
-└── manifest.webmanifest + icons/   "Add to Home Screen" app icon
+Song-Name_Artist-Name_day_month_year_Genre.mp3
+Bomba-Xeyallar_Fuad-Ildarov_4_November_2025_Pop.mp3
 ```
-The demo songs are short placeholder tones. Delete them when you add your real music.
+That name gives: title **Bomba Xeyallar**, artist **Fuad Ildarov**, released **4 November 2025**, genre **Pop**.
 
-## 2. Adding music
+* `_` separates the parts and `-` becomes a space. To keep a real hyphen, use `--` (e.g. `Jay--Z`).
+* Several artists: join them with `&`, e.g. `Song_Artist-One&Artist-Two_1_May_2026_Rap.mp3`
+* Shorter forms also work: `Song_Artist`, `Song_Artist_2026` or `Song_Artist_2026_Pop`.
+* Months can be English (`November`, `Nov`), numbers (`11`) or Azerbaijani (`Noyabr`).
+* Use `.mp3` or `.m4a`, **under 25 MB** each (the github.com upload limit).
 
-**Song:** `MUSIC/Artist - Title (Year).mp3`
-(several artists: `Artist A, Artist B - Title (2025).mp3`; a subfolder = an album).
-Use `.mp3` or `.m4a`. Each file must be **under 25 MB** when uploaded through github.com.
+## 2. Folders
 
-**Cover:** `COVERS/Artist - Title (Year).jpg` (same name, square, 500–1000 px).
+```
+MUSIC/                 songs
+LYR/                   lyrics: same name as the song, .txt (UTF-8)
+COVERS/songs/          song cover:      same name as the song   .jpg/.png/.webp
+COVERS/artists/        artist photo:    Fuad Ildarov.jpg  (or Fuad-Ildarov.jpg)
+COVERS/playlists/      playlist cover:  same name as the playlist file, e.g. Night Drive.jpg
+PLAYLISTS/             one .txt file per playlist
+VAULT/                 encrypted premium content (made by vault-maker.html)
+config.js              app name, contact, default colours
+```
+Files whose name starts with `_` (like `_README.txt`) are ignored.
+Square images of 500–1000 px work best. Songs and artists without an image get a calm grey placeholder.
 
-**Lyrics:** `LYR/Artist - Title (Year).txt`, plain text, saved as UTF-8 so letters like ə, ğ and ş display correctly.
-
-**Extra info (optional):** one row per song in `meta.csv`. Leave the cells you don't need empty.
-
-**Playlist:** `PLAYLISTS/Night Drive.txt`
+**Playlist file** `PLAYLISTS/Night Drive.txt`:
 ```
 # title: Night Drive
 # description: Late-night highway songs
-# section: Made for the road        ← home-page row (e.g. Fans of X)
-# created: 2026-10-12
-Neon Harbor - Midnight Lanes (2026)
-artist: Lumen Vale                  ← every song by this artist
-genre: Synthwave                    ← every song of this genre
-year: 2026                          ← every song from 2026
+# section: Made for the road          ← the home-page row it appears in (e.g. Fans of X)
+Bomba-Xeyallar_Fuad-Ildarov_4_November_2025_Pop
+artist: Fuad Ildarov                  ← every song by this artist
+genre: Pop                            ← every song of this genre
+year: 2025                            ← every song from 2025
 ```
 
-## 3. Publish on GitHub (one time)
+## 3. Premium (password-protected, hidden content)
 
-1. Create a **Public** repository on github.com (e.g. `orbit`).
-2. Choose **Add file → Upload files**, drag in everything from this folder, then click **Commit**.
-3. The `.github` folder is hidden on Mac and Windows, so create it by hand:
-   **Add file → Create new file**, name it `.github/workflows/deploy.yml`, paste in the contents of `deploy-workflow.yml`, and commit.
-4. Go to **Settings → Pages → Source: GitHub Actions**.
-5. Wait for the green tick in **Actions**. Your site is `https://YOUR-USERNAME.github.io/orbit/`
+On GitHub, anyone can open any file in a public repository, and other branches are just as public.
+A free GitHub Pages site can't use a private repository. So hidden content is **encrypted** instead:
 
-To add songs later, upload them to `MUSIC/` and commit. The site rebuilds itself in about a minute.
-Limits: GitHub recommends keeping the repo under about 1 GB, the published site can't exceed 1 GB, and bandwidth has a soft limit of about 100 GB per month.
+1. Put the hidden songs, lyrics, covers and playlists in **`PRIVATE/`** on your laptop. It uses the same folders and naming as above. **Never upload PRIVATE.**
+2. Open **`vault-maker.html`** in Chrome or Edge, enter the password, choose the `PRIVATE` folder, and click **Encrypt**. You get `VAULT.zip`.
+3. Unzip it, then upload the **`VAULT`** folder to the repository (Add file → Upload files → drag the folder in → Commit).
 
-## 4. Colours
+On GitHub, VAULT only contains files like `4422b3e85a0f….bin`: encrypted data with no song names, artists or audio that anyone can read.
+**The password is not stored anywhere on GitHub**, and not inside any file.
 
-The default palette is **Midnight Gold** (#000000 · #14213D · #FCA311 · #E5E5E5 · #FFFFFF).
-Listeners can switch between 6 palettes (Midnight Gold, Deep Ocean, Ember, Aurora, Forest, Mono),
-each with a dark and a light mode, from the logo menu or from Settings.
-To change the default for everyone, edit `defaultPalette` / `defaultMode` in `config.js`.
+Listeners unlock it in **Settings → Premium** (at the bottom). Each device remembers it, so they only enter it once.
+"Lock premium on this device" removes it again.
 
-## 5. Sharing
+When you add hidden songs later, run the Vault Maker again with the **same password** and upload the new `VAULT` folder.
+Existing files are replaced automatically. Old leftover `.bin` files are harmless.
 
-* **Songs, official playlists, artists, albums:** the share link opens the same page for your friend.
-* **Your own playlists and Liked Songs:** the song list is packed into the link. Your friend opens it and taps **Save** to keep a copy.
-  It's a snapshot: if you change the playlist later, send a new link.
-* Renaming a song file breaks old links to that song.
+Limits worth knowing:
+* Anyone you give the password to can listen to (and technically save) the songs.
+* People can see roughly how many encrypted files exist and their sizes, but not what they are.
+* A long password (like the one you chose) makes guessing impractical.
 
-## 6. Where data is stored
+## 4. Publish / update
 
-Likes, your own playlists, history, settings and downloads are saved **only on each listener's own device**, and they survive refreshing the page.
-On iPhone, tell friends to use **Add to Home Screen**: Safari can delete a website's saved data if the site isn't opened for about a week.
+Upload files on github.com and commit. GitHub Actions rebuilds the site in about a minute.
+`.github/workflows/deploy.yml` must exist in the repo; `deploy-workflow.yml` is a visible copy of it.
 
-> Only upload music you have the right to share. A public repo means anyone with the link can access the files.
+## 5. Colours
+
+The default palette is **Evergreen** (#121212 · #2A2A2A · #1DB954 · #B3B3B3 · #FFFFFF).
+Listeners can pick 7 palettes (each with a dark and a light mode) in Settings.
+To change the default for everyone, edit `defaultPalette` in `config.js`.
+
+## 6. Where listener data is stored
+
+Likes, their own playlists, history, settings, downloads and the premium unlock are saved **only on each listener's own device**.
+On iPhone, use **Add to Home Screen**: Safari can delete a website's saved data if the site isn't opened for about a week.

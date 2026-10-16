@@ -1,22 +1,22 @@
 /* =========================================================
    ORBIT - app logic (no frameworks, no build step)
    You normally never need to edit this file.
-   Content lives in: MUSIC/, COVERS/, LYR/, PLAYLISTS/, meta.csv, config.js
+   Content lives in: MUSIC/, COVERS/, LYR/, PLAYLISTS/, VAULT/, config.js
    ========================================================= */
 (() => {
 'use strict';
 
 /* ---------------- basics ---------------- */
-const SITE = Object.assign({ name: 'ORBIT', tagline: '', owner: '', contact: {}, about: '', terms: [], defaultPalette: 'gold', defaultMode: 'dark' }, window.SITE || {});
-const LIB = window.LIBRARY || { songs: [], playlists: [], generated: null };
-const VERSION = '1.1.0';
+const SITE = Object.assign({ name: 'ORBIT', tagline: '', owner: '', contact: {}, about: '', terms: [], defaultPalette: 'evergreen', defaultMode: 'dark' }, window.SITE || {});
+const LIB = window.LIBRARY || { songs: [], playlists: [], artists: {}, generated: null };
+const VERSION = '1.2.0';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const norm = (s) => String(s ?? '').toLowerCase().replace(/ı/g, 'i').replace(/ə/g, 'e')
   .normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
-const enc = (p) => String(p || '').split('/').map(encodeURIComponent).join('/');
+const enc = (p) => /^(blob:|data:)/.test(String(p || '')) ? p : String(p || '').split('/').map(encodeURIComponent).join('/');
 const abs = (u) => new URL(u, location.href).href;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const shuffled = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -33,16 +33,18 @@ const unpackCode = (code) => { try { const b = String(code).replace(/-/g, '+').r
 const store = {
   get(k, d) { try { const v = localStorage.getItem('orbit.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('orbit.' + k, JSON.stringify(v)); } catch { /* storage full / private mode */ } },
+  del(k) { try { localStorage.removeItem('orbit.' + k); } catch { } },
 };
 
 /* ---------------- palettes (CSS holds the full colour sets) ---------------- */
 const PALETTES = {
-  gold:   { name: 'Midnight Gold', sw: ['#000000', '#14213D', '#FCA311', '#E5E5E5', '#FFFFFF'] },
-  ocean:  { name: 'Deep Ocean',    sw: ['#020B12', '#0E2838', '#2DD4BF', '#7DD3FC', '#F2F8FB'] },
-  ember:  { name: 'Ember',         sw: ['#0A0605', '#261815', '#FF6B35', '#FFB347', '#FFF8F3'] },
-  aurora: { name: 'Aurora',        sw: ['#0A0A0F', '#1E1E29', '#A78BFA', '#22D3EE', '#F5F5F9'] },
-  forest: { name: 'Forest',        sw: ['#050A07', '#14261C', '#A3E635', '#34D399', '#F4F9F2'] },
-  mono:   { name: 'Mono',          sw: ['#000000', '#1C1C1C', '#FFFFFF', '#9A9A9A', '#FAFAFA'] },
+  evergreen: { name: 'Evergreen',     sw: ['#121212', '#2A2A2A', '#1DB954', '#B3B3B3', '#FFFFFF'] },
+  gold:      { name: 'Midnight Gold', sw: ['#000000', '#14213D', '#FCA311', '#E5E5E5', '#FFFFFF'] },
+  ocean:     { name: 'Deep Ocean',    sw: ['#020B12', '#0E2838', '#2DD4BF', '#7DD3FC', '#F2F8FB'] },
+  ember:     { name: 'Ember',         sw: ['#0A0605', '#261815', '#FF6B35', '#FFB347', '#FFF8F3'] },
+  aurora:    { name: 'Aurora',        sw: ['#0A0A0F', '#1E1E29', '#A78BFA', '#22D3EE', '#F5F5F9'] },
+  forest:    { name: 'Forest',        sw: ['#050A07', '#14261C', '#A3E635', '#34D399', '#F4F9F2'] },
+  mono:      { name: 'Mono',          sw: ['#000000', '#1C1C1C', '#FFFFFF', '#9A9A9A', '#FAFAFA'] },
 };
 
 /* ---------------- icons (original line set) ---------------- */
@@ -91,7 +93,6 @@ const ICONS = {
   trash: P_('M4 6.5h16M9.5 6.5V4h5v2.5M6.5 6.5l1 13.5h9l1-13.5M10.3 10.5v6M13.7 10.5v6'),
   note: P_('M9 18V5.5l11-2V16') + `<circle cx="6.3" cy="18" r="2.8"/><circle cx="17.3" cy="16" r="2.8"/>`,
   user: `<circle cx="12" cy="8" r="4"/>${P_('M4.5 20.5c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5')}`,
-  disc: `<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>`,
   vol: P_('M4 9.3v5.4h3.6L12.5 19V5L7.6 9.3z', 'fill="currentColor"') + P_('M16 8.8a4.6 4.6 0 0 1 0 6.4M18.6 6.2a8.3 8.3 0 0 1 0 11.6'),
   mute: P_('M4 9.3v5.4h3.6L12.5 19V5L7.6 9.3z', 'fill="currentColor"') + P_('M16.5 9.5l5 5M21.5 9.5l-5 5'),
   expand: P_('M14.5 3.5h6v6M9.5 20.5h-6v-6M20.5 3.5 14 10M3.5 20.5 10 14'),
@@ -99,41 +100,56 @@ const ICONS = {
   addList: P_('M3.5 6h12M3.5 11h12M3.5 16h7M18 13.5v7M14.5 17h7'),
   save: P_('M12 3.5v11M7.5 10 12 14.5 16.5 10M4.5 17.5v2.5h15v-2.5'),
   link: P_('M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1'),
-  sun: `<circle cx="12" cy="12" r="4"/>${P_('M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4')}`,
   bolt: P_('M13 2.5 4.5 13.5H11l-1 8 8.5-11H12z'),
   pin: P_('M9 3.5h6l-1 6 3.5 3.5v1.5h-11V13L10 9.5zM12 14.5V21', 'fill="currentColor"'),
   libAdd: P_('M4.5 3.5v17M9.5 3.5v17M14 4.2l2.4 6.6') + P_('M18.5 13.5v7M15 17h7'),
+  lock: `<rect x="4.5" y="10.5" width="15" height="10" rx="2"/>${P_('M8 10.5V7.5a4 4 0 0 1 8 0v3')}`,
+  unlock: `<rect x="4.5" y="10.5" width="15" height="10" rx="2"/>${P_('M8 10.5V7.5a4 4 0 0 1 7.7-1.5')}`,
+  crown: P_('M3.5 8l4.2 3.5L12 5l4.3 6.5L20.5 8l-1.8 10.5H5.3z', 'fill="currentColor"'),
 };
 const I = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 
 /* ---------------- library indexes ---------------- */
-const SONGS = (LIB.songs || []).filter((s) => s && s.id && s.file);
-const SONG = new Map(SONGS.map((s) => [s.id, s]));
-const PLAYLISTS = (LIB.playlists || []).map((p) => ({ ...p, songs: (p.songs || []).filter((id) => SONG.has(id)) }));
-const PL = new Map(PLAYLISTS.map((p) => [p.id, p]));
-const ARTISTS = new Map();
-const ALBUMS = new Map();
+const SONGS = [];
+const SONG = new Map();
+const PLAYLISTS = [];
+const PL = new Map();
+const ARTISTS = new Map();   // name -> {name, songs:[], cover}
 const GENRES = new Map();
 const YEARS = new Map();
 const durCache = store.get('dur', {});
 const dur = (s) => (s && (s.duration || durCache[s.id])) || 0;
 
-for (const s of SONGS) {
+function indexSong(s) {
+  if (!s || !s.id || !s.file || SONG.has(s.id)) return;
   s.artists = s.artists && s.artists.length ? s.artists : [s.artist || 'Unknown artist'];
-  for (const a of s.artists) { if (!ARTISTS.has(a)) ARTISTS.set(a, { name: a, songs: [] }); ARTISTS.get(a).songs.push(s.id); }
-  const al = s.album || s.title;
-  if (!ALBUMS.has(al)) ALBUMS.set(al, { name: al, artist: s.artist, year: s.year, songs: [] });
-  ALBUMS.get(al).songs.push(s.id);
+  s.artist = s.artist || s.artists.join(', ');
+  SONGS.push(s); SONG.set(s.id, s);
+  for (const a of s.artists) { if (!ARTISTS.has(a)) ARTISTS.set(a, { name: a, songs: [], cover: null, vault: true }); const A = ARTISTS.get(a); A.songs.push(s.id); if (!s.vault) A.vault = false; }
   if (s.genre) { if (!GENRES.has(s.genre)) GENRES.set(s.genre, []); GENRES.get(s.genre).push(s.id); }
   if (s.year) { if (!YEARS.has(String(s.year))) YEARS.set(String(s.year), []); YEARS.get(String(s.year)).push(s.id); }
-  const inPl = PLAYLISTS.filter((p) => p.songs.includes(s.id)).map((p) => p.title).join(' ');
-  s._t = norm(s.title); s._a = norm(s.artist); s._al = norm(al); s._g = norm(s.genre);
-  s._hay = norm([s.title, s.artist, al, s.genre, s.year, inPl].join(' '));
-  s._words = s._hay.split(' ');
-  s._ly = s.lyrics ? norm(s.lyrics) : '';
 }
-const byYearDesc = (a, b) => (SONG.get(b).year || 0) - (SONG.get(a).year || 0);
-const latestIds = () => SONGS.slice().sort((a, b) => String(b.added || '').localeCompare(String(a.added || '')) || (b.year || 0) - (a.year || 0)).map((s) => s.id);
+function indexPlaylist(p) {
+  const pl = { ...p, songs: (p.songs || []).filter((id) => SONG.has(id)) };
+  PLAYLISTS.push(pl); PL.set(pl.id, pl);
+}
+function setArtistCovers(map) { for (const [name, v] of Object.entries(map || {})) { const A = ARTISTS.get(name); if (A && v && v.cover) A.cover = v.cover; } }
+function buildHaystacks() {
+  for (const s of SONGS) {
+    const inPl = PLAYLISTS.filter((p) => p.songs.includes(s.id)).map((p) => p.title).join(' ');
+    s._t = norm(s.title); s._a = norm(s.artist); s._g = norm(s.genre);
+    s._hay = norm([s.title, s.artist, s.genre, s.year, s.dateText, inPl].join(' '));
+    s._words = s._hay.split(' ');
+    s._ly = s.lyrics ? norm(s.lyrics) : '';
+  }
+}
+(LIB.songs || []).forEach(indexSong);
+(LIB.playlists || []).forEach(indexPlaylist);
+setArtistCovers(LIB.artists);
+buildHaystacks();
+
+const byRelease = (a, b) => String(SONG.get(b).date || SONG.get(b).year || '').localeCompare(String(SONG.get(a).date || SONG.get(a).year || ''));
+const latestIds = () => SONGS.slice().sort((a, b) => String(b.added || '').localeCompare(String(a.added || '')) || String(b.date || '').localeCompare(String(a.date || ''))).map((s) => s.id);
 
 /* ---------------- user state (this device only) ---------------- */
 const U = {
@@ -143,11 +159,11 @@ const U = {
   recents: store.get('recents', []),
   searches: store.get('searches', []),
   dl: new Set(store.get('dl', [])),
-  settings: Object.assign({ mode: SITE.defaultMode || 'dark', palette: SITE.defaultPalette || 'gold', showLyrics: true, resume: true, libView: 'list', libSort: 'recents' }, store.get('settings', {})),
+  settings: Object.assign({ mode: SITE.defaultMode || 'dark', palette: SITE.defaultPalette || 'evergreen', showLyrics: true, resume: true, libView: 'list', libSort: 'recents' }, store.get('settings', {})),
 };
-if (!(U.settings.palette in PALETTES)) U.settings.palette = 'gold';
-U.liked = U.liked.filter((x) => SONG.has(x.id));
-U.recents = U.recents.filter((x) => x.type !== 'warp' || x.id === '');
+if (!store.get('palV2', false)) { U.settings.palette = SITE.defaultPalette || 'evergreen'; store.set('palV2', true); store.set('settings', U.settings); }
+if (!(U.settings.palette in PALETTES)) U.settings.palette = 'evergreen';
+U.recents = U.recents.filter((x) => x.type !== 'album' && (x.type !== 'warp' || x.id === ''));
 const isLiked = (id) => U.liked.some((x) => x.id === id);
 const saveU = (k) => store.set(k, k === 'dl' ? [...U.dl] : U[k]);
 
@@ -165,7 +181,7 @@ function pushHistory(id) {
 }
 function pushRecent(type, id) {
   if (['track', 'search', 'shared', 'queue'].includes(type)) return;
-  if (type === 'warp') id = '';   // all Warp variants count as one "Warp" tile
+  if (type === 'warp') id = '';
   U.recents = [{ type, id, t: Date.now() }, ...U.recents.filter((x) => !(x.type === type && x.id === id))].slice(0, 40);
   saveU('recents');
 }
@@ -175,21 +191,20 @@ function pushSearch(kind, id) {
 }
 
 /* ---------------- collections ---------------- */
+const realLiked = () => U.liked.map((x) => x.id).filter((id) => SONG.has(id));
 function coll(type, id = '') {
   switch (type) {
     case 'playlist': { const p = PL.get(id); if (!p) return null;
-      return { type, id, title: p.title, desc: p.description, cover: p.cover, songs: p.songs, kind: 'Playlist', created: p.created, section: p.section }; }
+      return { type, id, title: p.title, desc: p.description, cover: p.cover, songs: p.songs, kind: 'Playlist', created: p.created, section: p.section, vault: !!p.vault }; }
     case 'local': { const p = U.local.find((x) => x.id === id); if (!p) return null;
-      return { type, id, title: p.title, desc: p.from ? `Shared with you · saved on this device` : 'Your playlist · saved on this device', songs: p.songs.filter((x) => SONG.has(x)), kind: 'Playlist', created: p.created, local: true }; }
+      return { type, id, title: p.title, desc: p.from ? 'Shared with you · saved on this device' : 'Your playlist · saved on this device', songs: p.songs.filter((x) => SONG.has(x)), kind: 'Playlist', created: p.created, local: true }; }
     case 'shared': { const d = unpackCode(id); if (!d || !Array.isArray(d.s)) return null;
       const songs = d.s.filter((x) => SONG.has(x));
-      return { type, id, title: String(d.t || 'Shared playlist').slice(0, 80), desc: `Shared playlist${d.s.length > songs.length ? ` · ${d.s.length - songs.length} song(s) no longer available` : ''}`, songs, kind: 'Playlist', shared: true }; }
-    case 'liked': return { type, id: '', title: 'Liked Songs', songs: U.liked.map((x) => x.id), kind: 'Playlist', special: 'liked', desc: 'Saved on this device' };
+      return { type, id, title: String(d.t || 'Shared playlist').slice(0, 80), desc: `Shared playlist${d.s.length > songs.length ? ` · ${d.s.length - songs.length} song(s) not available here` : ''}`, songs, kind: 'Playlist', shared: true }; }
+    case 'liked': return { type, id: '', title: 'Liked Songs', songs: realLiked(), kind: 'Playlist', special: 'liked', desc: 'Saved on this device' };
     case 'downloads': return { type, id: '', title: 'Downloaded', songs: SONGS.filter((s) => U.dl.has(s.id)).map((s) => s.id), kind: 'Playlist', special: 'downloads', desc: 'Available offline on this device' };
     case 'artist': { const a = ARTISTS.get(id); if (!a) return null;
-      return { type, id, title: a.name, songs: a.songs.slice().sort(byYearDesc), kind: 'Artist', round: true }; }
-    case 'album': { const a = ALBUMS.get(id); if (!a) return null;
-      return { type, id, title: a.name, songs: a.songs, kind: a.songs.length > 1 ? 'Album' : 'Single', artist: a.artist, year: a.year }; }
+      return { type, id, title: a.name, songs: a.songs.slice().sort(byRelease), kind: 'Artist', round: true, cover: a.cover, vault: a.vault }; }
     case 'genre': { const g = GENRES.get(id); if (!g) return null; return { type, id, title: id, songs: g, kind: 'Genre mix', desc: `The best of ${id} in the library` }; }
     case 'year': { const y = YEARS.get(String(id)); if (!y) return null; return { type, id, title: `Released in ${id}`, songs: y, kind: 'Year mix' }; }
     case 'all': return { type, id: '', title: 'All songs', songs: SONGS.map((s) => s.id), kind: 'Everything' };
@@ -203,7 +218,7 @@ function coll(type, id = '') {
       else if (k === 'year') { ids = YEARS.get(val) || []; label = val; }
       else if (k === 'artist') { ids = (ARTISTS.get(val) || { songs: [] }).songs; label = val; }
       else if (k === 'unplayed') { const h = new Set(U.history.map((x) => x.id)); ids = ids.filter((x) => !h.has(x)); label = 'Never played'; }
-      else if (k === 'liked') { ids = U.liked.map((x) => x.id); label = 'Liked'; }
+      else if (k === 'liked') { ids = realLiked(); label = 'Liked'; }
       return { type, id: id || '', title: label ? `Warp · ${label}` : 'Warp', songs: ids, kind: 'Endless shuffle', special: 'warp' };
     }
     default: return null;
@@ -211,9 +226,9 @@ function coll(type, id = '') {
 }
 const collHref = (c) => c.type === 'warp' ? '#/warp' : `#/${c.type}${c.id !== '' && c.id != null ? '/' + enc64(c.id) : ''}`;
 const collSub = (c) => {
-  if (c.type === 'artist') return 'Artist';
-  if (c.type === 'album') return `${c.kind} · ${c.artist || ''}`;
+  if (c.type === 'artist') return c.vault ? 'Artist · Premium' : 'Artist';
   if (c.local) return 'Playlist · You';
+  if (c.vault) return 'Playlist · Premium';
   if (c.type === 'liked' || c.type === 'downloads') return `Playlist · ${c.songs.length} song${c.songs.length === 1 ? '' : 's'}`;
   return `${c.kind} · ${SITE.name}`;
 };
@@ -222,7 +237,7 @@ const totalDur = (ids) => { let t = 0, known = true; for (const id of ids) { con
 /* ---------------- covers ---------------- */
 const img = (src) => `<img src="${esc(enc(src))}" alt="" loading="lazy" decoding="async" draggable="false">`;
 const ph = (seed, text, icon = 'note') => `<div class="ph g${gIdx(seed)}">${text ? esc(text) : I(icon)}</div>`;
-const songCover = (s, cls = '') => `<div class="cover ${cls}">${s && s.cover ? img(s.cover) : ph((s && (s.album || s.title)) || 'x')}</div>`;
+const songCover = (s, cls = '') => `<div class="cover ${cls}">${s && s.cover ? img(s.cover) : ph((s && s.title) || 'x')}</div>`;
 const initials = (s) => String(s).split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 function collCover(c, cls = '') {
   if (!c) return `<div class="cover ${cls}">${ph('x')}</div>`;
@@ -231,10 +246,8 @@ function collCover(c, cls = '') {
   if (c.special === 'warp') return `<div class="cover ${cls}"><div class="ph warp">${I('spark')}</div></div>`;
   if (c.cover) return `<div class="cover ${cls}">${img(c.cover)}</div>`;
   if (c.type === 'track') return songCover(c.song, cls);
+  if (c.type === 'artist') return `<div class="cover ${cls}">${ph(c.title, initials(c.title))}</div>`;
   const covers = [...new Set(c.songs.map((id) => SONG.get(id)?.cover).filter(Boolean))];
-  if (c.type === 'artist' || c.type === 'album') {
-    return `<div class="cover ${cls}">${covers[0] ? img(covers[0]) : ph(c.title, c.type === 'artist' ? initials(c.title) : '', 'disc')}</div>`;
-  }
   if (covers.length >= 4) return `<div class="cover mosaic ${cls}">${covers.slice(0, 4).map(img).join('')}</div>`;
   if (covers.length) return `<div class="cover ${cls}">${img(covers[0])}</div>`;
   return `<div class="cover ${cls}">${ph(c.title, c.title)}</div>`;
@@ -257,7 +270,7 @@ function tintFor(src) {
           const wt = 1 + (mx - mn) / 32; r += d[i] * wt; g += d[i + 1] * wt; b += d[i + 2] * wt; w += wt;
         }
         const [h, s, l] = rgb2hsl(r / w, g / w, b / w);
-        const out = `hsl(${Math.round(h)} ${Math.round(clamp(s, .2, .65) * 100)}% ${Math.round(clamp(l, .22, .36) * 100)}%)`;
+        const out = `hsl(${Math.round(h)} ${Math.round(clamp(s, .15, .55) * 100)}% ${Math.round(clamp(l, .2, .32) * 100)}%)`;
         tintCache.set(src, out); res(out);
       } catch { res(null); }
     };
@@ -282,6 +295,81 @@ function toast(msg) {
 }
 
 /* =========================================================
+   Premium vault (password-protected, encrypted content)
+   The VAULT/ folder on GitHub only contains encrypted data.
+   Nothing can be read without the password: no song names,
+   no artists, no audio. The password itself is NOT stored on
+   GitHub; after unlocking, only the derived key is remembered
+   in this browser.
+   ========================================================= */
+const VAULT_URL = 'VAULT/vault.bin';
+const V = { key: null, loaded: false, urls: new Map(), pending: new Map(), count: 0 };
+const b64 = (bytes) => { let s = ''; for (const x of new Uint8Array(bytes)) s += String.fromCharCode(x); return btoa(s); };
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function fetchBin(path) {
+  const r = await fetch(enc(path), { cache: 'no-cache' });
+  if (!r.ok) throw new Error(r.status === 404 ? 'missing' : 'network');
+  return new Uint8Array(await r.arrayBuffer());
+}
+function vaultHeader(b) {
+  if (String.fromCharCode(...b.slice(0, 5)) !== 'ORBV1') throw new Error('format');
+  const iter = new DataView(b.buffer, b.byteOffset + 5, 4).getUint32(0);
+  return { iter, salt: b.slice(9, 25), iv: b.slice(25, 37), ct: b.slice(37) };
+}
+async function deriveKey(pw, salt, iter) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, true, ['decrypt']);
+}
+const aesOpen = async (key, iv, ct) => new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct));
+async function decryptFile(path) { const b = await fetchBin(path); return aesOpen(V.key, b.slice(0, 12), b.slice(12)); }
+async function decryptToURL(path, mime) { return URL.createObjectURL(new Blob([await decryptFile(path)], { type: mime || 'application/octet-stream' })); }
+
+async function openVault(password) {
+  if (!window.crypto || !crypto.subtle) throw new Error('insecure');
+  const h = vaultHeader(await fetchBin(VAULT_URL));
+  let key;
+  if (password) key = await deriveKey(password, h.salt, h.iter);
+  else { const st = store.get('vault', null); if (!st || !st.k) throw new Error('nokey'); key = await crypto.subtle.importKey('raw', unb64(st.k), 'AES-GCM', true, ['decrypt']); }
+  let m;
+  try { m = JSON.parse(new TextDecoder().decode(await aesOpen(key, h.iv, h.ct))); } catch { throw new Error('wrong'); }
+  if (password) store.set('vault', { k: b64(await crypto.subtle.exportKey('raw', key)) });
+  V.key = key;
+  await mergeVault(m);
+  return m;
+}
+async function mergeVault(m) {
+  if (V.loaded) return;
+  const cov = async (o) => { if (o && o.cover) { o.coverEnc = o.cover; try { o.cover = await decryptToURL(o.cover, o.coverMime); } catch { o.cover = null; } } };
+  const songs = m.songs || [], pls = m.playlists || [], arts = Object.entries(m.artists || {});
+  await Promise.allSettled([...songs.map(cov), ...pls.map(cov), ...arts.map(([, a]) => cov(a))]);
+  songs.forEach((s) => { s.vault = true; indexSong(s); });
+  pls.forEach((p) => indexPlaylist({ ...p, vault: true }));
+  setArtistCovers(Object.fromEntries(arts));
+  buildHaystacks();
+  V.loaded = true; V.count = songs.length;
+}
+/* decrypted audio is kept in memory for a few songs only */
+function vaultURL(s) {
+  if (V.urls.has(s.id)) return Promise.resolve(V.urls.get(s.id));
+  if (V.pending.has(s.id)) return V.pending.get(s.id);
+  const p = decryptToURL(s.file, s.mime).then((u) => {
+    V.urls.set(s.id, u); V.pending.delete(s.id);
+    for (const [id, url] of V.urls) { if (V.urls.size <= 4) break; if (id !== PS.cur && id !== s.id) { URL.revokeObjectURL(url); V.urls.delete(id); } }
+    return u;
+  }, (e) => { V.pending.delete(s.id); throw e; });
+  V.pending.set(s.id, p);
+  return p;
+}
+async function unlockVault(pw) {
+  try { await openVault(pw); toast('Premium unlocked'); render(true); renderSidebar(); }
+  catch (e) {
+    const msg = { wrong: 'Wrong password', missing: 'No premium content on this site yet', insecure: 'Open the https site to unlock', network: 'No connection, try again' }[e.message] || 'Could not unlock';
+    toast(msg);
+  }
+}
+function lockVault() { store.del('vault'); location.reload(); }
+
+/* =========================================================
    Playback engine
    ========================================================= */
 const audio = $('#audio');
@@ -289,12 +377,18 @@ const saved = store.get('player', null);
 const PS = {
   ctx: null, base: [], queue: [], idx: -1, manual: [], cur: null,
   shuffle: store.get('shuffle', false),
-  repeat: store.get('repeat', 'off'), // off | all | one
+  repeat: store.get('repeat', 'off'),
   want: false, errs: 0, sleep: null, pendingSeek: 0,
 };
 const songURL = (s) => enc(s.file);
-const isPlaying = () => !audio.paused && !audio.ended;
+const isPlaying = () => !audio.paused && !audio.ended && !isSilent();
 const sameCtx = (type, id) => !!PS.ctx && PS.ctx.type === type && String(PS.ctx.id) === String(id ?? '');
+/* tiny silent sound: lets iPhone start encrypted songs that need a moment to decrypt */
+const SILENT = (() => { const n = 800, b = new Uint8Array(44 + n), v = new DataView(b.buffer); const w = (o, s) => [...s].forEach((c, i) => b[o + i] = c.charCodeAt(0));
+  w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true); b.fill(128, 44);
+  return 'data:audio/wav;base64,' + b64(b); })();
+const isSilent = () => String(audio.getAttribute('src') || '').startsWith('data:');
+let loadTok = 0, primed = false;
 
 function playColl(c, startId = null, opts = {}) {
   if (!c || !c.songs.length) { toast('Nothing to play here yet'); return; }
@@ -311,14 +405,35 @@ function playColl(c, startId = null, opts = {}) {
 function load(id, autoplay, at = 0) {
   const s = SONG.get(id); if (!s) return;
   PS.cur = id; PS.want = autoplay; PS.pendingSeek = at;
-  audio.src = songURL(s);
-  if (autoplay) { audio.play().catch(() => {}); pushHistory(id); }
+  const tok = ++loadTok;
+  if (s.vault) {
+    if (autoplay && !primed) { audio.src = SILENT; audio.play().catch(() => {}); }
+    vaultURL(s).then((u) => {
+      if (tok !== loadTok) return;
+      audio.src = u; if (autoplay) audio.play().catch(() => {});
+      prefetchNext();
+    }).catch(() => {
+      if (tok !== loadTok) return;
+      toast(`Can't open “${s.title}”`);
+      if (autoplay && ++PS.errs < 6) setTimeout(() => next(false), 900);
+    });
+  } else {
+    audio.src = songURL(s);
+    if (autoplay) audio.play().catch(() => {});
+    prefetchNext();
+  }
+  if (autoplay) pushHistory(id);
   updateNowPlaying();
   saveState();
+}
+function prefetchNext() {
+  const id = PS.manual[0] || PS.queue[PS.idx + 1]; const s = SONG.get(id);
+  if (s && s.vault) vaultURL(s).catch(() => {});
 }
 function toggle() {
   if (!PS.cur) { playColl(coll('warp', ''), null, { forceShuffle: true }); return; }
   if (isPlaying()) { audio.pause(); PS.want = false; }
+  else if (isSilent() || !audio.getAttribute('src')) { load(PS.cur, true, PS.pendingSeek); }
   else { PS.want = true; audio.play().catch(() => toast('Tap play again to start')); }
 }
 function next(auto = false) {
@@ -365,33 +480,36 @@ function addToQueue(ids, front = false) {
   toast(front ? 'Playing next' : ids.length > 1 ? `${ids.length} songs added to queue` : 'Added to queue');
   saveState();
 }
-function seek(t) { if (isFinite(t)) audio.currentTime = clamp(t, 0, audio.duration || t); }
+function seek(t) { if (isFinite(t) && !isSilent()) audio.currentTime = clamp(t, 0, audio.duration || t); }
 
 let lastSave = 0;
 function saveState() {
   lastSave = Date.now();
-  store.set('player', { ctx: PS.ctx, base: PS.base, queue: PS.queue, idx: PS.idx, manual: PS.manual, cur: PS.cur, t: audio.currentTime || PS.pendingSeek || 0 });
+  store.set('player', { ctx: PS.ctx, base: PS.base, queue: PS.queue, idx: PS.idx, manual: PS.manual, cur: PS.cur, t: (!isSilent() && audio.currentTime) || PS.pendingSeek || 0 });
 }
 
 audio.addEventListener('loadedmetadata', () => {
+  if (isSilent()) return;
   if (PS.pendingSeek) { try { audio.currentTime = PS.pendingSeek; } catch { } PS.pendingSeek = 0; }
   if (PS.cur && isFinite(audio.duration) && !durCache[PS.cur]) { durCache[PS.cur] = Math.round(audio.duration); store.set('dur', durCache); }
   updateProgress(); updatePosition();
 });
 audio.addEventListener('timeupdate', () => {
+  if (isSilent()) return;
   updateProgress();
   if (Date.now() - lastSave > 5000) { saveState(); updatePosition(); }
   if (PS.sleep?.until && Date.now() >= PS.sleep.until) { audio.pause(); PS.want = false; PS.sleep = null; toast('Sleep timer: paused'); updateSleep(); }
 });
 audio.addEventListener('ended', () => {
+  if (isSilent()) return;
   if (PS.sleep?.eot) { PS.sleep = null; updateSleep(); toast('Sleep timer: paused'); PS.want = false; return; }
   next(true);
 });
 audio.addEventListener('play', updatePlayState);
 audio.addEventListener('pause', updatePlayState);
-audio.addEventListener('playing', () => { PS.errs = 0; updatePlayState(); });
+audio.addEventListener('playing', () => { primed = true; if (!isSilent()) PS.errs = 0; updatePlayState(); });
 audio.addEventListener('error', () => {
-  if (!PS.cur || !audio.getAttribute('src')) return;
+  if (!PS.cur || !audio.getAttribute('src') || isSilent()) return;
   const s = SONG.get(PS.cur);
   toast(`Can't play “${s ? s.title : 'this file'}”`);
   if (PS.want && ++PS.errs < Math.min(6, PS.queue.length + PS.manual.length)) setTimeout(() => next(false), 900);
@@ -407,15 +525,14 @@ if (MS) {
   h('nexttrack', () => next(false));
   h('seekto', (d) => { if (d.fastSeek && 'fastSeek' in audio) audio.fastSeek(d.seekTime); else seek(d.seekTime); updatePosition(); });
   h('stop', () => { audio.pause(); });
-  // seekbackward/seekforward intentionally not set, so iOS shows previous/next track buttons.
 }
 function updateMediaSession(s) {
   if (!MS || !s) return;
-  const art = s.cover ? [{ src: abs(enc(s.cover)), sizes: '512x512' }] : [{ src: abs('icons/icon-512.png'), sizes: '512x512', type: 'image/png' }];
-  try { MS.metadata = new MediaMetadata({ title: s.title, artist: s.artist, album: s.album || SITE.name, artwork: art }); } catch { }
+  const art = s.cover ? [{ src: /^blob:/.test(s.cover) ? s.cover : abs(enc(s.cover)), sizes: '512x512' }] : [{ src: abs('icons/icon-512.png'), sizes: '512x512', type: 'image/png' }];
+  try { MS.metadata = new MediaMetadata({ title: s.title, artist: s.artist, album: SITE.name, artwork: art }); } catch { }
 }
 function updatePosition() {
-  if (!MS || !MS.setPositionState || !isFinite(audio.duration) || !audio.duration) return;
+  if (!MS || !MS.setPositionState || isSilent() || !isFinite(audio.duration) || !audio.duration) return;
   try { MS.setPositionState({ duration: audio.duration, playbackRate: audio.playbackRate || 1, position: Math.min(audio.currentTime, audio.duration) }); } catch { }
 }
 
@@ -438,13 +555,12 @@ function restore() {
   PS.manual = (saved.manual || []).filter((x) => SONG.has(x));
   const i = PS.queue.indexOf(saved.cur);
   PS.idx = i >= 0 ? i : 0;
-  PS.cur = saved.cur; PS.pendingSeek = saved.t || 0;
-  audio.src = songURL(SONG.get(PS.cur));
-  updateNowPlaying();
+  load(saved.cur, false, saved.t || 0);
 }
 
 /* =========================================================
    Offline downloads (Cache Storage + service worker)
+   Premium songs are stored encrypted, exactly as on GitHub.
    ========================================================= */
 const MEDIA_CACHE = 'orbit-media-v1';
 const canCache = 'caches' in window && window.isSecureContext && location.protocol !== 'file:';
@@ -462,7 +578,8 @@ async function download(ids) {
     const s = SONG.get(id);
     try {
       await cache.add(songURL(s));
-      if (s.cover) await cache.add(enc(s.cover)).catch(() => {});
+      const cv = s.coverEnc || s.cover;
+      if (cv && !/^blob:/.test(cv)) await cache.add(enc(cv)).catch(() => {});
       U.dl.add(id); ok++;
       if (ids.length > 1) toast(`Downloading ${ok}/${ids.length}`);
       notifySW();
@@ -482,17 +599,19 @@ async function removeDownload(ids) {
 async function reconcileDownloads() {
   if (!canCache || !U.dl.size) return;
   const cache = await caches.open(MEDIA_CACHE); let changed = false;
-  for (const id of [...U.dl]) { const s = SONG.get(id); if (!s || !(await cache.match(songURL(s)))) { U.dl.delete(id); changed = true; } }
+  for (const id of [...U.dl]) { const s = SONG.get(id); if (!s) continue; if (!(await cache.match(songURL(s)))) { U.dl.delete(id); changed = true; } }
   if (changed) { saveU('dl'); refreshDownloads(); }
 }
 function notifySW() { navigator.serviceWorker?.controller?.postMessage({ type: 'refresh-media' }); }
 function refreshDownloads() { render(true); }
+async function saveToDevice(s) {
+  const name = s.fileName || s.file.split('/').pop();
+  const href = s.vault ? await vaultURL(s) : songURL(s);
+  const a = document.createElement('a'); a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
 
 /* =========================================================
    Sharing
-   - official songs / playlists / artists / albums: normal link
-   - your own playlists, Liked Songs, Downloaded: the song list is
-     packed into the link, so the friend can open + save it
    ========================================================= */
 const baseURL = () => location.href.split('#')[0].split('?')[0];
 function shareHashFor(c) {
@@ -503,7 +622,7 @@ function shareHashFor(c) {
   if (c.shared) return '#/shared/' + c.id;
   return collHref(c);
 }
-async function shareColl(c) {
+function shareColl(c) {
   if (!c) return;
   const h = shareHashFor(c);
   if (!h) { toast('Add some songs first'); return; }
@@ -636,19 +755,19 @@ function updateNowPlaying() {
   const s = SONG.get(PS.cur);
   elPlayer.classList.toggle('hidden', !s);
   if (!s) return;
-  $('#m-cover').innerHTML = s.cover ? img(s.cover) : ph(s.album || s.title);
+  $('#m-cover').innerHTML = s.cover ? img(s.cover) : ph(s.title);
   $('#m-title').textContent = s.title;
   $('#m-sub').textContent = s.artist;
-  $('#f-cover').innerHTML = s.cover ? img(s.cover) : ph(s.album || s.title);
+  $('#f-cover').innerHTML = s.cover ? img(s.cover) : ph(s.title);
   $('#f-title').textContent = s.title;
   $('#f-artist').textContent = s.artist;
-  const kinds = { playlist: 'Playing from playlist', local: 'Playing from playlist', shared: 'Playing from playlist', liked: 'Playing from playlist', downloads: 'Playing from playlist', artist: 'Playing from artist', album: 'Playing from album', search: 'Playing from search', warp: 'Warp mode', track: 'Playing song', queue: 'Playing from queue', genre: 'Playing from mix', year: 'Playing from mix', latest: 'Playing from', all: 'Playing from' };
+  const kinds = { playlist: 'Playing from playlist', local: 'Playing from playlist', shared: 'Playing from playlist', liked: 'Playing from playlist', downloads: 'Playing from playlist', artist: 'Playing from artist', search: 'Playing from search', warp: 'Warp mode', track: 'Playing song', queue: 'Playing from queue', genre: 'Playing from mix', year: 'Playing from mix' };
   $('#f-ctx-kind').textContent = kinds[PS.ctx?.type] || 'Playing from';
   $('#f-ctx').textContent = PS.ctx?.title || SITE.name;
   const lc = $('#f-lyrics');
   lc.classList.toggle('hidden', !(U.settings.showLyrics && s.lyrics));
   lc.innerHTML = s.lyrics ? `<h4>Lyrics <span style="font-size:12px;font-weight:500;opacity:.7">Tap to expand</span></h4><div class="lyr-preview">${esc(s.lyrics)}</div>` : '';
-  const rows = [['Artist', s.artist], ['Album', s.album !== s.title ? s.album : null], ['Released', s.year], ['Genre', s.genre], ['Added', s.added], ['Length', dur(s) ? fmt(dur(s)) : null]].filter((r) => r[1]);
+  const rows = [['Artist', s.artist], ['Released', s.dateText || s.year], ['Genre', s.genre], ['Added', s.vault ? null : s.added], ['Length', dur(s) ? fmt(dur(s)) : null]].filter((r) => r[1]);
   $('#f-about').innerHTML = `<h4>About this song</h4><dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
   const want = s.cover;
   tintFor(s.cover).then((c) => { if (SONG.get(PS.cur)?.cover !== want) return; [elPlayer, elFull, elOv].forEach((e) => setTint(e, c)); });
@@ -659,7 +778,7 @@ function updateNowPlaying() {
   if (elOv.classList.contains('queue-o')) openQueue();
 }
 function updatePlayState() {
-  const p = isPlaying();
+  const p = isPlaying() || (isSilent() && PS.want);
   $$('[data-playicon]').forEach((b) => { b.innerHTML = I(p ? 'pause' : 'play'); b.setAttribute('aria-label', p ? 'Pause' : 'Play'); });
   elFull.classList.toggle('paused', !p);
   document.body.classList.toggle('paused', !p);
@@ -668,7 +787,7 @@ function updatePlayState() {
   if (MS) MS.playbackState = p ? 'playing' : 'paused';
 }
 function updateProgress() {
-  const d = audio.duration || dur(SONG.get(PS.cur)) || 0, t = audio.currentTime || PS.pendingSeek || 0;
+  const d = (!isSilent() && audio.duration) || dur(SONG.get(PS.cur)) || 0, t = (!isSilent() && audio.currentTime) || PS.pendingSeek || 0;
   const pct = d ? clamp((t / d) * 100, 0, 100) : 0;
   const bar = $('#m-bar'); if (bar) bar.style.width = pct + '%';
   const dragging = $$('[data-seek]').some((r) => r.dragging);
@@ -741,7 +860,7 @@ function route() {
   try { arg = decodeURIComponent(arg); } catch { }
   return { r: r || 'home', arg };
 }
-const COLL_TYPES = ['playlist', 'local', 'shared', 'liked', 'downloads', 'artist', 'album', 'genre', 'year', 'all', 'latest', 'track'];
+const COLL_TYPES = ['playlist', 'local', 'shared', 'liked', 'downloads', 'artist', 'genre', 'year', 'all', 'latest', 'track'];
 const TABS = [
   { id: 'home', label: 'Home', icon: 'home', on: 'homeFill' },
   { id: 'search', label: 'Search', icon: 'search', on: 'searchBold' },
@@ -796,13 +915,14 @@ window.addEventListener('scroll', onScroll, { passive: true });
 const logoBtn = () => `<button class="logo-btn mobile-only" data-act="drawer" aria-label="Menu">${I('logo')}</button>`;
 const mainTop = (title, right = '') => `<header class="topbar">${logoBtn()}<h1 class="ellipsis">${esc(title)}</h1>${right}</header>`;
 const section = (title, inner, opts = {}) => inner ? `<section class="section"><div class="section-head"><div style="min-width:0">${opts.kicker ? `<span class="kicker">${esc(opts.kicker)}</span>` : ''}<h2 class="ellipsis">${esc(title)}</h2></div>${opts.more ? `<button data-href="${opts.more}">Show all</button>` : ''}</div>${inner}</section>` : '';
-const cardColl = (c, pick = '') => `<button class="card${c.round ? ' round' : ''}" data-href="${collHref(c)}"${pick ? ` data-pick="${pick}"` : ''}>${collCover(c)}<div class="c-title ellipsis">${esc(c.title)}</div><div class="c-sub">${esc(c.round ? 'Artist' : c.desc || collSub(c))}</div></button>`;
+const premiumBadge = (c) => c && c.vault ? `<span class="badge-p" title="Premium">${I('crown')}</span>` : '';
+const cardColl = (c, pick = '') => `<button class="card${c.round ? ' round' : ''}" data-href="${collHref(c)}"${pick ? ` data-pick="${pick}"` : ''}>${collCover(c)}<div class="c-title ellipsis">${esc(c.title)}</div><div class="c-sub">${esc(c.round ? collSub(c) : c.desc || collSub(c))}</div></button>`;
 const cardSong = (s, type, id = '') => `<button class="card" data-act="play-track" data-type="${type}" data-id="${esc(id)}" data-song="${esc(s.id)}">${songCover(s)}<div class="c-title ellipsis">${esc(s.title)}</div><div class="c-sub">${esc(s.artist)}${s.year ? ' · ' + s.year : ''}</div></button>`;
 const row = (items) => items.length ? `<div class="row">${items.join('')}</div>` : '';
 function trackRow(s, o = {}) {
   const d = dur(s);
   return `<div class="track${s.id === PS.cur ? ' now' : ''}" role="button" tabindex="0" data-act="play-track" data-type="${o.type || 'track'}" data-id="${esc(o.id ?? s.id)}" data-song="${esc(s.id)}"${o.pick ? ` data-pick="song:${esc(s.id)}"` : ''}>
-    ${o.num ? `<span class="num">${o.num}</span>` : songCover(s)}
+    ${songCover(s)}
     <div class="t-body"><div class="t-title ellipsis">${o.hlTitle || esc(s.title)}</div>
       <div class="t-sub"><span class="eq"><i></i><i></i><i></i></span>${U.dl.has(s.id) ? I('dlFill') : ''}<span class="ellipsis">${o.sub || esc(s.artist)}</span></div>${o.snippet || ''}</div>
     <span class="t-dur">${d ? fmt(d) : ''}</span>
@@ -821,7 +941,7 @@ function viewHome() {
 
   const seen = new Set(), quick = [];
   const addQ = (c) => { if (!c || !c.songs.length) return; const k = c.type + ':' + c.id; if (seen.has(k)) return; seen.add(k); quick.push(c); };
-  if (U.liked.length) addQ(coll('liked'));
+  if (realLiked().length) addQ(coll('liked'));
   U.recents.forEach((x) => addQ(coll(x.type, x.id)));
   PLAYLISTS.forEach((p) => addQ(coll('playlist', p.id)));
   addQ(coll('latest')); addQ(coll('warp', ''));
@@ -832,11 +952,9 @@ function viewHome() {
   out += section('Latest songs', row(latestIds().slice(0, 12).map((id) => cardSong(SONG.get(id), 'latest'))), { kicker: 'Fresh uploads', more: '#/latest' });
   const groups = new Map();
   PLAYLISTS.forEach((p) => { const k = p.section || 'Playlists'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(coll('playlist', p.id)); });
-  for (const [title, cs] of groups) out += section(title, row(cs.map((c) => cardColl(c))), { kicker: /^fans of/i.test(title) ? 'Picked for you' : '' });
+  for (const [title, cs] of groups) out += section(title, row(cs.map((c) => cardColl(c))), { kicker: /^fans of/i.test(title) ? 'Picked for you' : cs.some((c) => c.vault) ? 'Unlocked' : '' });
   const artists = [...ARTISTS.values()].sort((a, b) => b.songs.length - a.songs.length).slice(0, 12).map((a) => coll('artist', a.name));
   out += section('Artists', row(artists.map((c) => cardColl(c))));
-  const albums = [...ALBUMS.values()].filter((a) => a.songs.length > 1).map((a) => coll('album', a.name));
-  out += section('Albums', row(albums.map((c) => cardColl(c))));
   const recentSongs = [...new Set(U.history.map((x) => x.id))].filter((id) => SONG.has(id)).slice(0, 12);
   out += section('Recently played', row(recentSongs.map((id) => cardSong(SONG.get(id), 'track', id))), { more: '#/page/history' });
   out += section('Mixes by genre', row([...GENRES.keys()].map((g) => cardColl(coll('genre', g)))));
@@ -858,7 +976,7 @@ function lev1(a, b) {
 }
 function searchAll(q) {
   const nq = norm(q), toks = nq.split(' ').filter(Boolean);
-  const res = { songs: [], artists: [], playlists: [], albums: [], lyrics: [], mixes: [] };
+  const res = { songs: [], artists: [], playlists: [], lyrics: [], mixes: [] };
   if (!nq) return res;
   const isYear = /^(19|20)\d{2}$/.test(nq);
   for (const s of SONGS) {
@@ -866,7 +984,6 @@ function searchAll(q) {
     if (isYear && String(s.year) === nq) sc += 90;
     if (s._t === nq) sc += 100; else if (s._t.startsWith(nq)) sc += 80; else if (s._t.includes(nq)) sc += 60;
     if (s._a === nq) sc += 70; else if (s._a.startsWith(nq)) sc += 55; else if (s._a.includes(nq)) sc += 40;
-    if (s._al.includes(nq)) sc += 25;
     if (s._g && s._g.includes(nq)) sc += 25;
     if (!sc && !isYear && toks.every((t) => s._hay.includes(t))) sc = 30;
     if (!sc && !isYear && toks.every((t) => t.length >= 4 && s._words.some((w) => lev1(t, w)))) sc = 18;
@@ -878,10 +995,9 @@ function searchAll(q) {
   for (const a of ARTISTS.values()) { const n = norm(a.name); const sc = n === nq ? 100 : n.startsWith(nq) ? 80 : n.includes(nq) ? 50 : toks.every((t) => n.includes(t)) ? 35 : 0; if (sc) res.artists.push({ c: coll('artist', a.name), sc }); }
   for (const p of PLAYLISTS) { const n = norm(p.title), d = norm([p.description, p.section].join(' ')); const sc = n === nq ? 95 : n.startsWith(nq) ? 75 : n.includes(nq) ? 55 : toks.every((t) => (n + ' ' + d).includes(t)) ? 30 : 0; if (sc) res.playlists.push({ c: coll('playlist', p.id), sc }); }
   for (const p of U.local) { const n = norm(p.title); if (n.includes(nq)) res.playlists.push({ c: coll('local', p.id), sc: n === nq ? 95 : 55 }); }
-  for (const a of ALBUMS.values()) { if (a.songs.length < 2) continue; const n = norm(a.name); const sc = n === nq ? 90 : n.startsWith(nq) ? 70 : n.includes(nq) ? 45 : 0; if (sc) res.albums.push({ c: coll('album', a.name), sc }); }
   for (const g of GENRES.keys()) if (norm(g).includes(nq)) res.mixes.push(coll('genre', g));
   if (isYear && YEARS.has(nq)) res.mixes.unshift(coll('year', nq));
-  ['artists', 'playlists', 'albums'].forEach((k) => res[k].sort((a, b) => b.sc - a.sc));
+  ['artists', 'playlists'].forEach((k) => res[k].sort((a, b) => b.sc - a.sc));
   return res;
 }
 function highlight(text, q) {
@@ -897,7 +1013,7 @@ function lyricSnippet(s, q) {
 }
 function viewSearch() {
   return `<div class="page"><div class="sticky-search">${mainTop('Search')}
-    <label class="search-field">${I('searchBold')}<input id="q" type="search" placeholder="Songs, artists, lyrics, years…" value="${esc(SQ.q)}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+    <label class="search-field">${I('searchBold')}<input id="q" type="search" placeholder="What do you want to listen to?" value="${esc(SQ.q)}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
     <button class="icon-btn sm${SQ.q ? '' : ' hidden'}" data-act="clear-q" aria-label="Clear">${I('close')}</button></label>
     <div id="schips"></div></div><div id="sres"></div></div>`;
 }
@@ -925,30 +1041,28 @@ function renderResults() {
       ...PLAYLISTS.map((p) => [p.title, `#/playlist/${enc64(p.id)}`]),
     ];
     box.innerHTML = (recent ? section('Recent searches', `<div class="tracks">${recent}</div><button class="btn-pill" style="margin-top:10px" data-act="search-clear">Clear recent searches</button>`) : '')
-      + section('Browse all', `<div class="tiles">${tiles.map(([t, h], i) => `<button class="tile g${i % 6}" data-href="${h}">${esc(t)}</button>`).join('')}</div>`);
+      + section('Browse all', `<div class="tiles">${tiles.map(([t, h], i) => `<button class="tile t${i % 6}" data-href="${h}">${esc(t)}</button>`).join('')}</div>`);
     return;
   }
   const R = searchAll(q);
-  const counts = { songs: R.songs.length, artists: R.artists.length, playlists: R.playlists.length, albums: R.albums.length, lyrics: R.lyrics.length };
-  const chips = [['all', 'All'], ['songs', 'Songs'], ['artists', 'Artists'], ['playlists', 'Playlists'], ['albums', 'Albums'], ['lyrics', 'Lyrics']].filter(([k]) => k === 'all' || counts[k]);
+  const counts = { songs: R.songs.length, artists: R.artists.length, playlists: R.playlists.length, lyrics: R.lyrics.length };
+  const chips = [['all', 'All'], ['songs', 'Songs'], ['artists', 'Artists'], ['playlists', 'Playlists'], ['lyrics', 'Lyrics']].filter(([k]) => k === 'all' || counts[k]);
   chipsBox.innerHTML = `<div class="chips">${chips.map(([k, l]) => `<button class="chip${SQ.filter === k ? ' on' : ''}" data-act="schip" data-v="${k}">${l}</button>`).join('')}</div>`;
-  if (!R.songs.length && !R.artists.length && !R.playlists.length && !R.albums.length && !R.mixes.length) {
+  if (!R.songs.length && !R.artists.length && !R.playlists.length && !R.mixes.length) {
     box.innerHTML = emptyState('search', `No results for “${q}”`, 'Check the spelling, or try fewer words, an artist, a lyric line or a year.');
     return;
   }
   const songRow = (x) => trackRow(x.s, { type: 'search', id: q, pick: true, hlTitle: highlight(x.s.title, q), sub: `Song · ${highlight(x.s.artist, q)}${x.s.year ? ' · ' + x.s.year : ''}`, snippet: x.lyr && !x.s._hay.includes(norm(q)) ? lyricSnippet(x.s, q) : '' });
-  const collList = (arr, kind) => `<div class="tracks lib-list">${arr.map((x) => `<button class="track${x.c.round ? ' round' : ''}" data-href="${collHref(x.c)}" data-pick="${x.c.type || kind}:${esc(x.c.id)}">${collCover(x.c)}<div class="t-body"><div class="t-title ellipsis">${highlight(x.c.title, q)}</div><div class="t-sub"><span class="ellipsis">${esc(collSub(x.c))}</span></div></div></button>`).join('')}</div>`;
+  const collList = (arr) => `<div class="tracks lib-list">${arr.map((x) => `<button class="track${x.c.round ? ' round' : ''}" data-href="${collHref(x.c)}" data-pick="${x.c.type}:${esc(x.c.id)}">${collCover(x.c)}<div class="t-body"><div class="t-title ellipsis">${highlight(x.c.title, q)}</div><div class="t-sub">${premiumBadge(x.c)}<span class="ellipsis">${esc(collSub(x.c))}</span></div></div></button>`).join('')}</div>`;
   const f = SQ.filter;
   if (f === 'songs') { box.innerHTML = `<div class="tracks">${R.songs.map(songRow).join('')}</div>`; markNowPlaying(); return; }
-  if (f === 'artists') { box.innerHTML = collList(R.artists, 'artist'); return; }
-  if (f === 'playlists') { box.innerHTML = collList(R.playlists, 'playlist'); return; }
-  if (f === 'albums') { box.innerHTML = collList(R.albums, 'album'); return; }
+  if (f === 'artists') { box.innerHTML = collList(R.artists); return; }
+  if (f === 'playlists') { box.innerHTML = collList(R.playlists); return; }
   if (f === 'lyrics') { box.innerHTML = `<div class="tracks">${R.lyrics.map((s) => trackRow(s, { type: 'search', id: q, pick: true, snippet: lyricSnippet(s, q) })).join('')}</div>`; markNowPlaying(); return; }
   const cands = [];
   if (R.songs[0]) cands.push({ sc: R.songs[0].sc, kind: 'song', s: R.songs[0].s });
   if (R.artists[0]) cands.push({ sc: R.artists[0].sc + 5, kind: 'artist', c: R.artists[0].c });
   if (R.playlists[0]) cands.push({ sc: R.playlists[0].sc, kind: R.playlists[0].c.type, c: R.playlists[0].c });
-  if (R.albums[0]) cands.push({ sc: R.albums[0].sc - 5, kind: 'album', c: R.albums[0].c });
   cands.sort((a, b) => b.sc - a.sc);
   const top = cands[0];
   let out = '';
@@ -960,7 +1074,6 @@ function renderResults() {
   out += section('Songs', `<div class="tracks">${R.songs.slice(0, 6).map(songRow).join('')}</div>${R.songs.length > 6 ? `<button class="btn-pill" style="margin-top:8px" data-act="schip" data-v="songs">See all ${R.songs.length} songs</button>` : ''}`);
   out += section('Artists', row(R.artists.slice(0, 10).map((x) => cardColl(x.c, `artist:${esc(x.c.id)}`))));
   out += section('Playlists', row(R.playlists.slice(0, 10).map((x) => cardColl(x.c, `${x.c.type}:${esc(x.c.id)}`))));
-  out += section('Albums', row(R.albums.slice(0, 10).map((x) => cardColl(x.c, `album:${esc(x.c.id)}`))));
   out += section('Mixes', row(R.mixes.map((c) => cardColl(c))));
   if (R.lyrics.length) out += section('Found in lyrics', `<div class="tracks">${R.lyrics.slice(0, 5).map((s) => trackRow(s, { type: 'search', id: q, pick: true, snippet: lyricSnippet(s, q) })).join('')}</div>`);
   box.innerHTML = out;
@@ -982,7 +1095,7 @@ function viewWarp() {
       ${section('Warp by genre', GENRES.size ? `<div class="chips wrap">${[...GENRES.keys()].map((g) => chip('genre:' + g, g)).join('')}</div>` : '')}
       ${section('Warp through time', YEARS.size ? `<div class="chips wrap">${[...YEARS.keys()].sort().reverse().map((y) => chip('year:' + y, y)).join('')}</div>` : '')}
       ${section('Warp an artist', artists.length ? `<div class="chips wrap">${artists.map((a) => chip('artist:' + a.name, a.name)).join('')}</div>` : '')}
-      ${section('Special', `<div class="chips wrap">${chip('unplayed', 'Never played')}${U.liked.length ? chip('liked', 'Liked only') : ''}</div>`)}
+      ${section('Special', `<div class="chips wrap">${chip('unplayed', 'Never played')}${realLiked().length ? chip('liked', 'Liked only') : ''}</div>`)}
     </div></div>`;
 }
 
@@ -996,8 +1109,7 @@ function libItems() {
   if (U.dl.size) push(coll('downloads'), 'playlist', '9998', true);
   U.local.forEach((p) => push(coll('local', p.id), 'playlist', p.created));
   PLAYLISTS.forEach((p) => push(coll('playlist', p.id), 'playlist', p.created));
-  [...ARTISTS.values()].forEach((a) => push(coll('artist', a.name), 'artist', a.songs.map((id) => SONG.get(id).added).sort().pop()));
-  [...ALBUMS.values()].filter((a) => a.songs.length > 1).forEach((a) => push(coll('album', a.name), 'album', a.songs.map((id) => SONG.get(id).added).sort().pop()));
+  [...ARTISTS.values()].forEach((a) => push(coll('artist', a.name), 'artist', a.songs.map((id) => SONG.get(id).added || '').sort().pop()));
   const srt = U.settings.libSort;
   items.sort((a, b) => (b.pinned - a.pinned) || (srt === 'alpha' ? a.c.title.localeCompare(b.c.title) : srt === 'added' ? String(b.added).localeCompare(String(a.added)) : (a.rec - b.rec) || String(b.added).localeCompare(String(a.added))));
   return items;
@@ -1009,11 +1121,11 @@ function viewLibrary() {
   if (LS.q) items = items.filter((x) => norm(x.c.title).includes(norm(LS.q)));
   const grid = U.settings.libView === 'grid';
   const sortLabel = { recents: 'Recents', added: 'Recently added', alpha: 'Alphabetical' }[U.settings.libSort] || 'Recents';
-  const chips = [['playlist', 'Playlists'], ['artist', 'Artists'], ['album', 'Albums'], ['downloaded', 'Downloaded']]
+  const chips = [['playlist', 'Playlists'], ['artist', 'Artists'], ['downloaded', 'Downloaded']]
     .map(([k, l]) => `<button class="chip${LS.filter === k ? ' on' : ''}" data-act="lib-chip" data-v="${k}">${l}</button>`).join('');
   const list = items.map((x) => grid
     ? `<button class="card${x.c.round ? ' round' : ''}" data-href="${collHref(x.c)}">${collCover(x.c)}<div class="c-title ellipsis">${esc(x.c.title)}</div><div class="c-sub">${esc(collSub(x.c))}</div></button>`
-    : `<button class="track${x.c.round ? ' round' : ''}" data-href="${collHref(x.c)}">${collCover(x.c)}<div class="t-body"><div class="t-title ellipsis">${esc(x.c.title)}</div><div class="t-sub">${x.pinned ? I('pin', 'pin') : ''}<span class="ellipsis">${esc(collSub(x.c))}</span></div></div></button>`).join('');
+    : `<button class="track${x.c.round ? ' round' : ''}" data-href="${collHref(x.c)}">${collCover(x.c)}<div class="t-body"><div class="t-title ellipsis">${esc(x.c.title)}</div><div class="t-sub">${x.pinned ? I('pin', 'pin') : ''}${premiumBadge(x.c)}<span class="ellipsis">${esc(collSub(x.c))}</span></div></div></button>`).join('');
   return `<div class="page">${mainTop('Your Library', `<button class="icon-btn" data-act="lib-find" aria-label="Find">${I('search')}</button><button class="icon-btn" data-act="new-pl" aria-label="Create playlist">${I('plus')}</button>`)}
     ${LS.find ? `<div class="findbar"><label class="field">${I('search')}<input id="libq" placeholder="Find in Your Library" value="${esc(LS.q)}"></label><button class="btn-ghost" data-act="lib-find">Cancel</button></div>` : ''}
     <div class="chips">${LS.filter ? `<button class="chip" data-act="lib-chip" data-v="${LS.filter}" aria-label="Clear filter">${I('close')}</button>` : ''}${chips}</div>
@@ -1027,11 +1139,12 @@ function bindLibFind(focus) {
   i.addEventListener('input', () => { LS.q = i.value; const pos = i.selectionStart; render(true); const j = $('#libq'); if (j) { j.focus(); j.setSelectionRange(pos, pos); } });
 }
 
-/* ---------- COLLECTION (playlist / artist / album / mix / song / shared) ---------- */
+/* ---------- COLLECTION (playlist / artist / mix / song / shared) ---------- */
 const CS = {};
+const SORTS = [['custom', 'Custom order'], ['title', 'Title'], ['artist', 'Artist'], ['release', 'Release date'], ['added', 'Recently added']];
 function viewColl(type, id) {
   const c = coll(type, id);
-  if (!c) return `<div class="page">${backTop('')}${emptyState('help', 'Not found', type === 'shared' ? 'This share link looks broken or incomplete. Ask your friend to send it again.' : type === 'local' ? 'This playlist only exists on the phone where it was made.' : 'This item is no longer in the library.')}</div>`;
+  if (!c) return `<div class="page">${backTop('')}${emptyState(type === 'track' || type === 'playlist' || type === 'artist' ? 'lock' : 'help', 'Not found', type === 'shared' ? 'This share link looks broken or incomplete. Ask your friend to send it again.' : type === 'local' ? 'This playlist only exists on the phone where it was made.' : 'This item is not in the library, or it needs Premium (Settings → Premium).')}</div>`;
   const key = type + ':' + id, st = CS[key] || (CS[key] = { sort: 'custom', q: '' });
   let ids = c.songs.slice();
   if (st.q) { const nq = norm(st.q); ids = ids.filter((x) => SONG.get(x)._hay.includes(nq)); }
@@ -1039,15 +1152,14 @@ function viewColl(type, id) {
   if (st.sort === 'title') ids.sort((a, b) => S(a).title.localeCompare(S(b).title));
   else if (st.sort === 'artist') ids.sort((a, b) => S(a).artist.localeCompare(S(b).artist));
   else if (st.sort === 'added') ids.sort((a, b) => String(S(b).added).localeCompare(String(S(a).added)));
-  else if (st.sort === 'year') ids.sort((a, b) => (S(b).year || 0) - (S(a).year || 0));
+  else if (st.sort === 'release') ids.sort(byRelease);
   const { t, known } = totalDur(c.songs);
   const allDl = c.songs.length && c.songs.every((x) => U.dl.has(x));
   const n = c.songs.length, songsTxt = `${n} song${n === 1 ? '' : 's'}`;
   let meta;
-  if (c.type === 'artist') meta = `${songsTxt}${known && t ? ' · ' + fmtLong(t) : ''}`;
-  else if (c.type === 'album') meta = `<b>${esc(c.artist)}</b>${c.year ? ' · ' + c.year : ''} · ${songsTxt}`;
-  else if (c.type === 'track') meta = `<b>${esc(c.song.artist)}</b>${c.song.year ? ' · ' + c.song.year : ''}${dur(c.song) ? ' · ' + fmt(dur(c.song)) : ''}`;
-  else meta = `<span class="mini-logo">${I('logo')}</span><b>${c.local || c.special === 'liked' ? 'You' : c.shared ? 'A friend' : esc(SITE.name)}</b> · ${songsTxt}${known && t ? ', ' + fmtLong(t) : ''}`;
+  if (c.type === 'artist') meta = `${premiumBadge(c)}${songsTxt}${known && t ? ' · ' + fmtLong(t) : ''}`;
+  else if (c.type === 'track') meta = `<b>${esc(c.song.artist)}</b>${c.song.dateText ? ' · ' + esc(c.song.dateText) : ''}${c.song.genre ? ' · ' + esc(c.song.genre) : ''}${dur(c.song) ? ' · ' + fmt(dur(c.song)) : ''}`;
+  else meta = `${c.vault ? premiumBadge(c) : `<span class="mini-logo">${I('logo')}</span>`}<b>${c.local || c.special === 'liked' ? 'You' : c.shared ? 'A friend' : esc(SITE.name)}</b> · ${songsTxt}${known && t ? ', ' + fmtLong(t) : ''}`;
 
   let out = `<div class="page">${backTop(c.title, type, id)}
     <div class="hero${c.round ? ' round' : ''}" id="hero">${collCover(c)}
@@ -1065,14 +1177,14 @@ function viewColl(type, id) {
   if (c.shared) out += `<div class="shared-note">${I('link')}<span>A friend shared this playlist. Tap <b>Save</b> to keep it in Your Library.</span></div>`;
   if (n > 5 && c.type !== 'track') {
     out += `<div class="findbar"><label class="field">${I('search')}<input id="cq" placeholder="Find in ${esc(c.kind.toLowerCase())}" value="${esc(st.q)}" data-key="${esc(key)}"></label>
-      <button class="btn-ghost" data-act="coll-sort" data-key="${esc(key)}">${I('sort')} ${{ custom: 'Order', title: 'Title', artist: 'Artist', added: 'Added', year: 'Year' }[st.sort]}</button></div>`;
+      <button class="btn-ghost" data-act="coll-sort" data-key="${esc(key)}">${I('sort')} ${(SORTS.find((x) => x[0] === st.sort) || SORTS[0])[1].replace('Custom order', 'Order')}</button></div>`;
   }
   if (!n) {
     out += c.special === 'liked' ? emptyState('heart', 'Songs you like will appear here', 'Tap the heart on any song to save it.') :
       c.special === 'downloads' ? emptyState('dl', 'No downloads yet', 'Tap the download button on any playlist to keep it for offline listening.') :
       emptyState('note', 'This playlist is empty', c.local ? 'Add songs with ··· → Add to playlist.' : 'Songs will appear here soon.');
   } else {
-    out += `<div class="tracks">${ids.map((x, i) => trackRow(SONG.get(x), { type, id, num: c.type === 'album' ? i + 1 : 0 })).join('')}</div>`;
+    out += `<div class="tracks">${ids.map((x) => trackRow(SONG.get(x), { type, id })).join('')}</div>`;
     if (st.q && !ids.length) out += `<p class="muted">No matches in this list.</p>`;
   }
   if (c.type === 'track') {
@@ -1082,13 +1194,8 @@ function viewColl(type, id) {
     out += '<div style="height:24px"></div>' + section(`More by ${s.artists[0]}`, row(more.slice(0, 12).map((x) => cardSong(SONG.get(x), 'artist', s.artists[0]))));
   }
   if (c.type === 'artist') {
-    const albums = [...ALBUMS.values()].filter((a) => a.songs.some((x) => SONG.get(x).artists.includes(c.title))).map((a) => coll('album', a.name));
     const feats = PLAYLISTS.filter((p) => p.songs.some((x) => SONG.get(x).artists.includes(c.title))).map((p) => coll('playlist', p.id));
-    out += '<div style="height:24px"></div>' + section('Releases', row(albums.map((x) => cardColl(x)))) + section('Featured in', row(feats.map((x) => cardColl(x))));
-  }
-  if (c.type === 'album') {
-    const others = [...ALBUMS.values()].filter((a) => a.name !== c.title && a.artist === c.artist).map((a) => coll('album', a.name));
-    out += '<div style="height:24px"></div>' + section(`More by ${c.artist}`, row(others.map((x) => cardColl(x))));
+    out += '<div style="height:24px"></div>' + section('Featured in', row(feats.map((x) => cardColl(x))));
   }
   return out + '</div>';
 }
@@ -1103,6 +1210,16 @@ document.addEventListener('input', (e) => {
 /* ---------- PAGES: settings, history, about, help, terms, contact ---------- */
 const palCard = (k) => { const p = PALETTES[k]; const on = U.settings.palette === k;
   return `<button class="pal${on ? ' on' : ''}" data-act="set" data-k="palette" data-v="${k}" aria-label="${esc(p.name)}"><div class="sw">${p.sw.map((c) => `<i style="background:${c}"></i>`).join('')}</div><b>${esc(p.name)}${on ? I('check') : ''}</b></button>`; };
+function premiumBlock(li) {
+  if (V.loaded) return `<div class="list-group">
+      ${li('unlock', 'Premium unlocked', `${V.count} extra song${V.count === 1 ? '' : 's'} · remembered on this device`, '', '', 'ok')}
+      ${li('lock', 'Lock premium on this device', 'You will need the password again', '', 'role="button" data-act="vault-lock"', 'danger')}
+    </div>`;
+  return `<div class="list-group">
+      ${li('lock', 'Premium content', 'Enter the password to unlock hidden playlists. You only need to do this once on each device.')}
+      <form class="premium-form" data-form="vault"><label class="field">${I('lock')}<input id="vault-pw" type="password" placeholder="Password" autocomplete="current-password" enterkeyhint="go"></label><button class="btn-pill accent" type="submit">Unlock</button></form>
+    </div>`;
+}
 function viewPage(name) {
   const st = U.settings;
   const wrap = (title, body) => `<div class="page">${backTop(title)}<h1 class="page-title">${esc(title)}</h1>${body}</div>`;
@@ -1130,6 +1247,8 @@ function viewPage(name) {
         ${li('search', 'Clear recent searches', '', '', 'role="button" data-act="clear-searches"')}
         ${li('close', 'Reset everything', 'Likes, playlists, history, downloads, settings', '', 'role="button" data-act="reset-all"', 'danger')}
       </div>
+      <div class="list-title" id="premium"><span class="badge-p">${I('crown')}</span> Premium</div>
+      ${premiumBlock(li)}
       <p class="muted" style="font-size:12px;text-align:center">${esc(SITE.name)} v${VERSION}</p>`);
     case 'history': {
       const list = U.history.filter((x) => SONG.has(x.id)).slice(0, 200);
@@ -1143,13 +1262,14 @@ function viewPage(name) {
       return wrap('Recents', `<div class="actions"><button class="btn-pill" data-act="clear-history">${I('trash')} Clear history</button></div><div class="tracks">${out}</div>`);
     }
     case 'about': {
-      const { t, known } = totalDur(SONGS.map((s) => s.id));
+      const pub = SONGS.filter((s) => !s.vault);
+      const { t, known } = totalDur(pub.map((s) => s.id));
       const gen = LIB.generated ? new Date(LIB.generated).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
       return wrap('About', `
         <div style="display:flex;gap:16px;align-items:center;margin-bottom:18px"><span class="logo-btn" style="width:64px;height:64px">${I('logo')}</span><div><b style="font-size:22px;letter-spacing:.06em">${esc(SITE.name)}</b><div class="muted">${esc(SITE.tagline)}</div></div></div>
         <p class="prose">${esc(SITE.about)}</p>
         <div class="list-group">
-          ${li('note', 'Songs', '', `<b>${SONGS.length}</b>`)}${li('user', 'Artists', '', `<b>${ARTISTS.size}</b>`)}${li('library', 'Playlists', '', `<b>${PLAYLISTS.length}</b>`)}
+          ${li('note', 'Songs', '', `<b>${pub.length}</b>`)}${li('user', 'Artists', '', `<b>${[...ARTISTS.values()].filter((a) => !a.vault).length}</b>`)}${li('library', 'Playlists', '', `<b>${PLAYLISTS.filter((p) => !p.vault).length}</b>`)}
           ${known && t ? li('clock', 'Total music', '', `<b>${fmtLong(t)}</b>`) : ''}
           ${li('bolt', 'Library updated', '', `<span class="muted">${gen}</span>`)}
           ${li('info', 'Version', '', `<span class="muted">${VERSION}</span>`)}
@@ -1162,11 +1282,11 @@ function viewPage(name) {
         ['Does music keep playing with the screen locked?', 'Yes. Start a song, then lock the phone or switch apps. Control it from the lock screen, Control Centre, headphones, Bluetooth or CarPlay.'],
         ['Playing in the car', 'Connect the phone via Bluetooth or CarPlay, open the site and press play. Song title, artist and cover appear on the car screen; next/previous buttons on the steering wheel work too.'],
         ['Listening offline', 'Tap the download arrow on a playlist (or ··· → Download on a song). Downloaded songs show a small arrow and play without internet.'],
-        ['Sharing', 'Tap the share icon on any song, playlist, artist or album. Your own playlists and Liked Songs are shared as a snapshot: your friend opens the link and taps Save to keep a copy.'],
-        ['What can I search?', 'Song titles, artists, albums, genres, playlist names, a line of the lyrics, or a release year like 2026. Small typos are forgiven.'],
+        ['Sharing', 'Tap the share icon on any song, playlist or artist. Your own playlists and Liked Songs are shared as a snapshot: your friend opens the link and taps Save to keep a copy.'],
+        ['What is Premium?', 'Some playlists are hidden. If you were given the password, open Settings → Premium (at the bottom) and enter it once. The device remembers it.'],
+        ['What can I search?', 'Song titles, artists, genres, playlist names, a line of the lyrics, a release year like 2026 or a month like “November 2025”. Small typos are forgiven.'],
         ['Likes, playlists and history', 'Everything you like or create is saved only on this device and browser. Nobody else can see it.'],
         ['Colours', 'Tap the logo → Settings → pick a palette and dark or light mode.'],
-        ['Shuffle and repeat', 'Shuffle mixes the list but keeps the current song. Repeat cycles: off → whole list → one song.'],
         ['Gestures', 'Swipe the mini player or the big cover left/right to skip. Swipe the full player down to close it.'],
         ['A song is missing or won’t play', 'Use Contact to tell the owner which one.'],
       ];
@@ -1196,7 +1316,7 @@ function renderSidebar() {
   el.innerHTML = `<div class="side-box"><div class="side-brand"><button class="logo-btn" data-act="drawer" aria-label="Menu">${I('logo')}</button>${esc(SITE.name)}</div>
     ${TABS.map((t) => `<button class="side-nav${lastTab === t.id ? ' on' : ''}" data-act="tab" data-v="${t.id}">${I(lastTab === t.id ? t.on : t.icon)} ${t.label}</button>`).join('')}</div>
     <div class="side-box grow"><div class="side-lib-head"><button data-href="#/library" style="display:flex;gap:10px;align-items:center;font-weight:700">${I('library')} Your Library</button><button class="icon-btn sm" data-act="new-pl" aria-label="Create playlist">${I('plus')}</button></div>
-    <div class="tracks lib-list">${libItems().slice(0, 80).map((x) => `<button class="track${x.c.round ? ' round' : ''}" data-href="${collHref(x.c)}">${collCover(x.c)}<div class="t-body"><div class="t-title ellipsis">${esc(x.c.title)}</div><div class="t-sub"><span class="ellipsis">${esc(collSub(x.c))}</span></div></div></button>`).join('')}</div></div>`;
+    <div class="tracks lib-list">${libItems().slice(0, 80).map((x) => `<button class="track${x.c.round ? ' round' : ''}" data-href="${collHref(x.c)}">${collCover(x.c)}<div class="t-body"><div class="t-title ellipsis">${esc(x.c.title)}</div><div class="t-sub">${premiumBadge(x.c)}<span class="ellipsis">${esc(collSub(x.c))}</span></div></div></button>`).join('')}</div></div>`;
   const g = $('.side-box.grow', el); if (g) g.scrollTop = sc;
 }
 let rsT; window.addEventListener('resize', () => { clearTimeout(rsT); rsT = setTimeout(renderSidebar, 150); });
@@ -1216,7 +1336,7 @@ function openDrawer() {
     <button class="d-item" data-href="#/page/about">${I('info')} About</button>
     <button class="d-item" data-href="#/page/terms">${I('doc')} Terms & privacy</button>
     <button class="d-item" data-href="#/page/contact">${I('mail')} Contact</button>
-    <div class="d-foot">${SONGS.length} songs · ${PLAYLISTS.length} playlists${LIB.generated ? '<br>Updated ' + new Date(LIB.generated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}</div>`;
+    <div class="d-foot">${SONGS.filter((s) => !s.vault).length} songs · ${PLAYLISTS.filter((p) => !p.vault).length} playlists${LIB.generated ? '<br>Updated ' + new Date(LIB.generated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}</div>`;
   $('#drawer').classList.add('open'); $('#drawer-scrim').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false');
 }
 function closeDrawer() { $('#drawer').classList.remove('open'); $('#drawer-scrim').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); }
@@ -1231,7 +1351,7 @@ function trackMenu(id, type, cid) {
   const s = SONG.get(id); if (!s) return;
   const d = { song: id, type: type || '', id: cid || '' };
   const liked = isLiked(id), dl = U.dl.has(id);
-  openSheet(`<div class="s-head">${songCover(s)}<div style="min-width:0"><b class="ellipsis">${esc(s.title)}</b><span class="muted ellipsis" style="display:block">${esc(s.artist)}</span></div></div>
+  openSheet(`<div class="s-head">${songCover(s)}<div style="min-width:0"><b class="ellipsis">${esc(s.title)}</b><span class="muted ellipsis" style="display:block">${esc(s.artist)}${s.dateText ? ' · ' + esc(s.dateText) : ''}</span></div></div>
     ${sItem(liked ? 'heartFill' : 'heart', liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', 'like', d, liked)}
     ${sItem('addList', 'Add to playlist', 'addpl', d)}
     ${type === 'local' ? sItem('trash', 'Remove from this playlist', 'rmpl', d) : ''}
@@ -1241,7 +1361,6 @@ function trackMenu(id, type, cid) {
     ${sItem('save', 'Save file to device', 'save', d)}
     ${s.lyrics ? sItem('mic', 'View lyrics', 'lyrics', d) : ''}
     ${sItem('user', s.artists.length > 1 ? 'Go to artists' : 'Go to artist', 'artist', d)}
-    ${sItem('disc', 'Go to album', 'album', d)}
     ${sItem('info', 'Song details', 'details', d)}
     ${sItem('share', 'Share', 'share', d)}`);
 }
@@ -1255,7 +1374,6 @@ function collMenu(type, id) {
     ${sItem('queue', 'Add to queue', 'cqueue', d)}
     ${sItem(allDl ? 'dlFill' : 'dl', allDl ? 'Remove download' : 'Download', 'cdl', d, allDl)}
     ${sItem('share', 'Share', 'cshare', d)}
-    ${c.type === 'album' ? sItem('user', 'Go to artist', 'cartist', d) : ''}
     ${c.local ? sItem('edit', 'Rename', 'crename', d) + sItem('trash', 'Delete playlist', 'cdelete', d) : ''}`);
 }
 function sleepMenu() {
@@ -1288,8 +1406,8 @@ function applyTheme() {
   if (m === 'system') m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   const root = document.documentElement;
   root.dataset.theme = m;
-  root.dataset.palette = st.palette in PALETTES ? st.palette : 'gold';
-  const bg = getComputedStyle(root).getPropertyValue('--bg').trim() || '#000000';
+  root.dataset.palette = st.palette in PALETTES ? st.palette : 'evergreen';
+  const bg = getComputedStyle(root).getPropertyValue('--bg').trim() || '#121212';
   $('meta[name="theme-color"]').setAttribute('content', bg);
 }
 matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => { if (U.settings.mode === 'system') applyTheme(); });
@@ -1299,6 +1417,14 @@ const goArtistOf = (s) => {
   else { closeLayers(); go(`#/artist/${enc64(s.artists[0])}`); }
 };
 
+document.addEventListener('submit', (e) => {
+  const f = e.target.closest('[data-form="vault"]'); if (!f) return;
+  e.preventDefault();
+  const i = $('#vault-pw'); const pw = (i?.value || '').trim();
+  if (!pw) { toast('Enter the password'); return; }
+  i.blur(); unlockVault(pw);
+});
+
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act],[data-href]'); if (!el) return;
   const sw = el.closest('.m-swipe'); if (sw && sw._swiped && Date.now() - sw._swiped < 450) return;
@@ -1306,7 +1432,6 @@ document.addEventListener('click', (e) => {
   if (d.pick) { const k = d.pick.indexOf(':'); pushSearch(d.pick.slice(0, k), d.pick.slice(k + 1)); }
   if (!act && d.href) { e.preventDefault(); closeLayers(); go(d.href); return; }
   switch (act) {
-    /* navigation */
     case 'tab': closeLayers(); if (route().r === d.v) window.scrollTo({ top: 0, behavior: 'smooth' }); else go('#/' + d.v); break;
     case 'back': if (navCount > 0) { goingBack = true; history.back(); } else go('#/' + (lastTab || 'home')); break;
     case 'drawer': openDrawer(); break;
@@ -1316,7 +1441,6 @@ document.addEventListener('click', (e) => {
     case 'goto-ctx': { const c = PS.ctx && coll(PS.ctx.type, PS.ctx.id); if (c) { closeLayers(); go(collHref(c)); } break; }
     case 'goto-artist': { const s = SONG.get(PS.cur); if (s) goArtistOf(s); break; }
 
-    /* playback */
     case 'toggle': toggle(); break;
     case 'next': next(false); break;
     case 'prev': prev(); break;
@@ -1345,33 +1469,25 @@ document.addEventListener('click', (e) => {
     case 'share-song': { const s = SONG.get(d.song); if (s) share(s.title, `#/track/${enc64(s.id)}`); break; }
     case 'cur-more': if (PS.cur) trackMenu(PS.cur, PS.ctx?.type, PS.ctx?.id); break;
 
-    /* menus */
     case 'track-more': e.stopPropagation(); trackMenu(d.song, d.type, d.id); break;
     case 'coll-more': collMenu(d.type, d.id); break;
     case 'menu': runMenu(d); break;
     case 'coll-dl': { const c = coll(d.type, d.id); if (!c || !c.songs.length) break; const all = c.songs.every((x) => U.dl.has(x)); if (all) { if (confirm(`Remove “${c.title}” from downloads?`)) removeDownload(c.songs); } else download(c.songs); break; }
     case 'share-coll': shareColl(coll(d.type, d.id)); break;
     case 'save-shared': saveShared(d.id); break;
-    case 'coll-sort': {
-      const st = CS[d.key];
-      openSheet(`<div class="s-title">Sort by</div>${[['custom', 'Custom order'], ['title', 'Title'], ['artist', 'Artist'], ['added', 'Recently added'], ['year', 'Release year']].map(([v, l]) => sItem('sort', l, 'csort', { key: d.key, v }, st.sort === v)).join('')}`);
-      break;
-    }
+    case 'coll-sort': openSheet(`<div class="s-title">Sort by</div>${SORTS.map(([v, l]) => sItem('sort', l, 'csort', { key: d.key, v }, CS[d.key].sort === v)).join('')}`); break;
 
-    /* search */
     case 'clear-q': e.preventDefault(); SQ.q = ''; SQ.filter = 'all'; $('#q').value = ''; el.classList.add('hidden'); renderResults(); $('#q').focus(); break;
     case 'schip': SQ.filter = SQ.filter === d.v && d.v !== 'all' ? 'all' : d.v; renderResults(); window.scrollTo(0, 0); break;
     case 'search-forget': e.stopPropagation(); U.searches.splice(+d.i, 1); saveU('searches'); renderResults(); break;
     case 'search-clear': U.searches = []; saveU('searches'); renderResults(); break;
 
-    /* library */
     case 'lib-chip': LS.filter = LS.filter === d.v ? '' : d.v; render(true); break;
     case 'lib-view': U.settings.libView = U.settings.libView === 'grid' ? 'list' : 'grid'; saveSettings(); render(true); break;
     case 'lib-sort': openSheet(`<div class="s-title">Sort by</div>${[['recents', 'Recents'], ['added', 'Recently added'], ['alpha', 'Alphabetical']].map(([v, l]) => sItem('sort', l, 'libsort', { v }, U.settings.libSort === v)).join('')}`); break;
     case 'lib-find': LS.find = !LS.find; if (!LS.find) LS.q = ''; render(true); bindLibFind(true); break;
     case 'new-pl': { const p = createPlaylist(); if (p) { closeLayers(); go(`#/local/${enc64(p.id)}`); } break; }
 
-    /* warp */
     case 'warp-go': {
       const id = d.id || '';
       if (sameCtx('warp', id)) toggle();
@@ -1380,14 +1496,14 @@ document.addEventListener('click', (e) => {
     }
     case 'warp-surprise': { const c = coll('warp', ''); if (!c.songs.length) break; playColl(c, c.songs[(Math.random() * c.songs.length) | 0], { forceShuffle: true }); openFull(); break; }
 
-    /* settings */
     case 'set': U.settings[d.k] = d.v; saveSettings(); applyTheme(); if (route().r === 'page') render(true); if ($('#drawer').classList.contains('open')) openDrawer(); break;
     case 'set-toggle': U.settings[d.k] = !U.settings[d.k]; saveSettings(); render(true); if (PS.cur) updateNowPlaying(); break;
     case 'theme-toggle': U.settings.mode = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; saveSettings(); applyTheme(); openDrawer(); if (route().r === 'page') render(true); break;
+    case 'vault-lock': if (confirm('Lock premium content on this device?')) lockVault(); break;
     case 'clear-history': if (confirm('Clear your listening history?')) { U.history = []; U.recents = []; saveU('history'); saveU('recents'); render(true); toast('History cleared'); } break;
     case 'clear-searches': U.searches = []; saveU('searches'); toast('Recent searches cleared'); break;
     case 'dl-clear-all': if (U.dl.size && confirm('Remove all downloaded songs from this device?')) { (async () => { if (canCache) await caches.delete(MEDIA_CACHE); U.dl.clear(); saveU('dl'); notifySW(); refreshDownloads(); toast('Downloads removed'); })(); } break;
-    case 'reset-all': if (confirm('Reset everything on this device? Likes, your playlists, history, downloads and settings will be removed.')) {
+    case 'reset-all': if (confirm('Reset everything on this device? Likes, your playlists, history, downloads, premium and settings will be removed.')) {
       (async () => { Object.keys(localStorage).filter((k) => k.startsWith('orbit.')).forEach((k) => localStorage.removeItem(k)); if (canCache) await caches.delete(MEDIA_CACHE); location.hash = '#/home'; location.reload(); })(); } break;
     default: if (d.href) { closeLayers(); go(d.href); }
   }
@@ -1405,10 +1521,9 @@ function runMenu(d) {
     case 'queue': addToQueue([d.song]); break;
     case 'playnext': addToQueue([d.song], true); break;
     case 'dl': U.dl.has(d.song) ? removeDownload([d.song]) : download([d.song]); break;
-    case 'save': { const a = document.createElement('a'); a.href = songURL(s); a.download = s.file.split('/').pop(); document.body.appendChild(a); a.click(); a.remove(); break; }
+    case 'save': saveToDevice(s).catch(() => toast('Could not save the file')); break;
     case 'lyrics': openLyrics(d.song); break;
     case 'artist': goArtistOf(s); break;
-    case 'album': closeLayers(); go(`#/album/${enc64(s.album || s.title)}`); break;
     case 'details': closeLayers(); go(`#/track/${enc64(s.id)}`); break;
     case 'share': share(s.title, `#/track/${enc64(s.id)}`); break;
     case 'sleep': setSleep(d.v === 'eot' ? 'eot' : +d.v); if (route().arg === 'settings') render(true); break;
@@ -1419,7 +1534,6 @@ function runMenu(d) {
     case 'cqueue': if (c) addToQueue(c.songs); break;
     case 'cdl': if (c) { c.songs.every((x) => U.dl.has(x)) ? removeDownload(c.songs) : download(c.songs); } break;
     case 'cshare': shareColl(c); break;
-    case 'cartist': if (c && c.songs.length) { closeLayers(); go(`#/artist/${enc64(SONG.get(c.songs[0]).artists[0])}`); } break;
     case 'crename': { const p = U.local.find((x) => x.id === d.id); const n = p && (window.prompt('Rename playlist', p.title) || '').trim(); if (n) { p.title = n.slice(0, 80); saveU('local'); render(true); } break; }
     case 'cdelete': { if (confirm('Delete this playlist?')) { U.local = U.local.filter((x) => x.id !== d.id); saveU('local'); go('#/library'); } break; }
   }
@@ -1444,12 +1558,18 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) saveS
 /* =========================================================
    Start
    ========================================================= */
-applyTheme();
-buildPlayerUI();
-restore();
-render();
-reconcileDownloads();
-if ('serviceWorker' in navigator && canCache) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
-}
+(async () => {
+  applyTheme();
+  buildPlayerUI();
+  let vp = null;
+  if (store.get('vault', null)) {
+    vp = openVault(null).catch((e) => { if (['wrong', 'missing', 'format'].includes(e.message)) store.del('vault'); throw e; });
+    try { await Promise.race([vp, new Promise((_, r) => setTimeout(() => r(new Error('slow')), 8000))]); } catch { }
+  }
+  restore();
+  render();
+  if (vp && !V.loaded) vp.then(() => { if (!PS.cur) restore(); render(true); }).catch(() => {});
+  reconcileDownloads();
+  if ('serviceWorker' in navigator && canCache) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
 })();

@@ -1,15 +1,14 @@
 /* ORBIT service worker: offline app shell + downloaded songs (with seeking support) */
-const SHELL = 'orbit-shell-v2';
+const SHELL = 'orbit-shell-v3';
 const MEDIA = 'orbit-media-v1';
 const IMAGES = 'orbit-img-v1';
-const SHELL_FILES = ['./', 'index.html', 'styles.css', 'app.js', 'config.js', 'library.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
+const SHELL_FILES = ['./', 'index.html', 'styles.css?v=1.2.0', 'app.js?v=1.2.0', 'config.js?v=1.2.0', 'library.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 const AUDIO_RE = /\.(mp3|m4a|aac|mp4|wav|ogg|oga|opus|flac|webm)$/i;
 const IMG_RE = /\.(jpe?g|png|webp|gif|svg)$/i;
-let known = new Set(); // URLs of downloaded songs
+const VAULT_MEDIA_RE = /\/VAULT\/(?!vault\.bin$)[^/]+\.bin$/;
+let known = new Set();
 
-async function loadKnown() {
-  try { const c = await caches.open(MEDIA); known = new Set((await c.keys()).map((r) => r.url)); } catch { }
-}
+async function loadKnown() { try { const c = await caches.open(MEDIA); known = new Set((await c.keys()).map((r) => r.url)); } catch { } }
 loadKnown();
 
 self.addEventListener('install', (e) => {
@@ -22,7 +21,7 @@ self.addEventListener('activate', (e) => {
     await self.clients.claim();
   })());
 });
-self.addEventListener('message', (e) => { if (e.data?.type === 'refresh-media') e.waitUntil ? e.waitUntil(loadKnown()) : loadKnown(); });
+self.addEventListener('message', (e) => { if (e.data?.type === 'refresh-media') loadKnown(); });
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
@@ -30,10 +29,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
   const href = url.href.split('#')[0];
-  if (AUDIO_RE.test(url.pathname)) {
-    if (known.has(href) || !self.navigator.onLine) e.respondWith(media(req, href));
-    return;
-  }
+  if (AUDIO_RE.test(url.pathname)) { if (known.has(href) || !self.navigator.onLine) e.respondWith(media(req, href)); return; }
+  if (VAULT_MEDIA_RE.test(url.pathname)) { e.respondWith(cacheOnlyIfDownloaded(req)); return; }
   if (IMG_RE.test(url.pathname)) { e.respondWith(staleWhileRevalidate(req)); return; }
   e.respondWith(networkFirst(req));
 });
@@ -51,10 +48,11 @@ async function media(req, href) {
   if (m[1] === '' && m[2]) { start = Math.max(0, total - Number(m[2])); end = total - 1; }
   else { start = Number(m[1] || 0); end = m[2] ? Math.min(Number(m[2]), total - 1) : total - 1; }
   if (start >= total) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${total}` } });
-  return new Response(buf.slice(start, end + 1), {
-    status: 206,
-    headers: { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Length': String(end - start + 1), 'Accept-Ranges': 'bytes' },
-  });
+  return new Response(buf.slice(start, end + 1), { status: 206, headers: { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Length': String(end - start + 1), 'Accept-Ranges': 'bytes' } });
+}
+async function cacheOnlyIfDownloaded(req) {   // encrypted premium files: never duplicated into the shell cache
+  const hit = await (await caches.open(MEDIA)).match(req, { ignoreSearch: true });
+  return hit || fetch(req);
 }
 async function staleWhileRevalidate(req) {
   const hit = await caches.match(req, { ignoreSearch: true });

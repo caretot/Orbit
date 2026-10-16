@@ -2,27 +2,47 @@
 """
 ORBIT library builder
 ---------------------
-Scans MUSIC/, COVERS/, LYR/, PLAYLISTS/ and meta.csv, then writes library.js
-which the website reads. Runs automatically on GitHub (see .github/workflows),
-or locally with:  python build_library.py
+Scans MUSIC/, COVERS/, LYR/, PLAYLISTS/ and writes library.js, which the website reads.
+Runs automatically on GitHub (see .github/workflows) or locally:  python build_library.py
 
-Naming rules (no coding needed):
-  MUSIC/Artist - Title (2026).mp3     -> artist, title, year read from the name
-  COVERS/Artist - Title (2026).jpg    -> cover with the SAME name as the song
-  LYR/Artist - Title (2026).txt       -> lyrics with the SAME name as the song
-  meta.csv (optional)                 -> override title/artist/album/year/genre/added
-  PLAYLISTS/Any name.txt              -> one playlist per file (see README)
+Everything about a song comes from its FILE NAME:
+
+    Song-Name_Artist-Name_day_month_year_Genre.mp3
+    Bomba-Xeyallar_Fuad-Ildarov_4_November_2025_Pop.mp3
+      -> title "Bomba Xeyallar", artist "Fuad Ildarov", released 4 November 2025, genre "Pop"
+
+  * "_" separates the parts, "-" becomes a space, "--" becomes a real hyphen.
+  * Several artists: join them with "&"   e.g.  Song_Artist-One&Artist-Two_1_May_2026_Rap
+  * Shorter forms also work:  Song_Artist   /   Song_Artist_2026   /   Song_Artist_2026_Pop
+  * Month: January..December, Jan..Dec, 1..12 or Azerbaijani (Yanvar..Dekabr).
+
+Images (same name, .jpg/.png/.webp):
+  COVERS/songs/<song file name>.jpg      COVERS/artists/<Artist Name>.jpg
+  COVERS/playlists/<playlist file name>.jpg
+Lyrics: LYR/<song file name>.txt
+Files whose name starts with "_" are ignored everywhere.
 """
-import csv, hashlib, json, os, re, subprocess, sys, unicodedata
+import hashlib, json, os, re, subprocess, sys, unicodedata
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-MUSIC, COVERS, LYR, PLAYLISTS = (os.path.join(ROOT, d) for d in ("MUSIC", "COVERS", "LYR", "PLAYLISTS"))
+D = lambda *p: os.path.join(ROOT, *p)
 AUDIO_EXT = {".mp3", ".m4a", ".aac", ".mp4", ".wav", ".ogg", ".oga", ".opus", ".flac", ".webm"}
-IMG_EXT = [".jpg", ".jpeg", ".png", ".webp"]
+IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
+
+MONTHS = {}
+for i, names in enumerate([
+    ("january", "jan", "yanvar"), ("february", "feb", "fevral"), ("march", "mar", "mart"),
+    ("april", "apr", "aprel"), ("may", "may"), ("june", "jun", "iyun", "i̇yun"),
+    ("july", "jul", "iyul", "i̇yul"), ("august", "aug", "avqust"), ("september", "sep", "sept", "sentyabr"),
+    ("october", "oct", "oktyabr"), ("november", "nov", "noyabr"), ("december", "dec", "dekabr")], 1):
+    for n in names:
+        MONTHS[n] = i
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August",
+               "September", "October", "November", "December"]
 
 try:
-    import mutagen  # optional: reads tags + duration if installed (pip install mutagen)
+    import mutagen  # optional, only used to read the song LENGTH
 except Exception:
     mutagen = None
 
@@ -33,18 +53,55 @@ def rel(path):
     return os.path.relpath(path, ROOT).replace(os.sep, "/")
 
 
-def slug(s):
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-    s = re.sub(r"[^a-zA-Z0-9]+", "-", s).strip("-").lower()
-    return s or "item"
+def key(s):
+    """loose matching key: case/accents/-/_/spaces ignored"""
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "", s)
 
 
-def uid(prefix, key, label=None):
-    return f"{slug(label or key)[:40]}-{hashlib.md5((prefix + key).encode()).hexdigest()[:5]}"
+def uid(prefix, raw):
+    s = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode()
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", s).strip("-").lower() or "item"
+    return f"{s[:40]}-{hashlib.md5((prefix + raw).encode()).hexdigest()[:5]}"
+
+
+def words(part):
+    return re.sub(r"\s+", " ", part.replace("--", "\u0000").replace("-", " ").replace("\u0000", "-")).strip()
+
+
+def parse_name(stem):
+    """returns dict(title, artists, year, date, dateText, genre) or None"""
+    parts = [p for p in stem.split("_")]
+    if len(parts) < 2:
+        m = re.match(r"^(.+?) - (.+?)(?:\s*[\(\[]((?:19|20)\d{2})[\)\]])?$", stem)  # legacy "Artist - Title (2026)"
+        if not m:
+            return None
+        return dict(title=m.group(2).strip(), artists=[a.strip() for a in re.split(r"\s*(?:,|&)\s*", m.group(1)) if a.strip()],
+                    year=int(m.group(3)) if m.group(3) else None, date=None, dateText=m.group(3), genre=None)
+    title, artist, rest = words(parts[0]), parts[1], parts[2:]
+    artists = [words(a) for a in re.split(r"[&+,]", artist) if words(a)] or ["Unknown artist"]
+    year = date = text = genre = None
+    if len(rest) >= 3 and rest[0].isdigit() and rest[2].isdigit() and len(rest[2]) == 4:
+        d = int(rest[0]); mo = MONTHS.get(rest[1].lower()) or (int(rest[1]) if rest[1].isdigit() else None); y = int(rest[2])
+        if mo and 1 <= mo <= 12 and 1 <= d <= 31:
+            year, date, text = y, f"{y:04d}-{mo:02d}-{d:02d}", f"{d} {MONTH_NAMES[mo - 1]} {y}"
+            rest = rest[3:]
+        else:
+            warnings.append(f'Could not read the date in "{stem}"')
+            rest = rest[3:]
+    elif len(rest) >= 2 and rest[1].isdigit() and len(rest[1]) == 4 and MONTHS.get(rest[0].lower()):  # month_year
+        mo, y = MONTHS[rest[0].lower()], int(rest[1])
+        year, date, text = y, f"{y:04d}-{mo:02d}-01", f"{MONTH_NAMES[mo - 1]} {y}"
+        rest = rest[2:]
+    elif rest and rest[0].isdigit() and len(rest[0]) == 4:
+        year, text = int(rest[0]), rest[0]
+        rest = rest[1:]
+    if rest:
+        genre = words(" ".join(rest))
+    return dict(title=title, artists=artists, year=year, date=date, dateText=text, genre=genre)
 
 
 def git_added_date(path):
-    """First commit date of a file (works on GitHub Actions with fetch-depth: 0)."""
     try:
         out = subprocess.run(["git", "log", "--diff-filter=A", "--follow", "--format=%aI", "--", path],
                              cwd=ROOT, capture_output=True, text=True, timeout=20).stdout.strip().splitlines()
@@ -69,134 +126,87 @@ def read_text(path):
     return ""
 
 
-def parse_name(stem):
-    """'Artist A, Artist B - Title (2026)' -> (artist, title, year)"""
-    year = None
-    m = re.search(r"[\(\[]((?:19|20)\d{2})[\)\]]\s*$", stem)
-    if m:
-        year = int(m.group(1))
-        stem = stem[: m.start()].strip()
-    if " - " in stem:
-        artist, title = stem.split(" - ", 1)
-    else:
-        artist, title = "Unknown artist", stem
-    return artist.strip(), title.strip(), year
+def image_index(folder):
+    idx = {}
+    if os.path.isdir(folder):
+        for fn in os.listdir(folder):
+            st, ext = os.path.splitext(fn)
+            if ext.lower() in IMG_EXT and not fn.startswith(("_", ".")):
+                idx[key(st)] = rel(os.path.join(folder, fn))
+    return idx
 
 
-def split_artists(a):
-    parts = re.split(r"\s*(?:,|&| x | feat\.? | ft\.? | featuring )\s*", a, flags=re.I)
-    return [p.strip() for p in parts if p.strip()] or ["Unknown artist"]
-
-
-def read_tags(path):
-    info = {}
+def duration(path):
     if not mutagen:
-        return info
+        return None
     try:
-        f = mutagen.File(path, easy=True)
-        if f is None:
-            return info
-        if getattr(f, "info", None) and getattr(f.info, "length", None):
-            info["duration"] = round(float(f.info.length))
-        tags = f.tags or {}
-        def first(k):
-            v = tags.get(k)
-            return (v[0] if isinstance(v, list) and v else v) or None
-        if first("title"): info["title"] = str(first("title"))
-        if first("artist"): info["artist"] = str(first("artist"))
-        if first("album"): info["album"] = str(first("album"))
-        if first("genre"): info["genre"] = str(first("genre"))
-        d = first("date")
-        if d and re.match(r"^\d{4}", str(d)): info["year"] = int(str(d)[:4])
-    except Exception as e:
-        warnings.append(f"tag read failed for {rel(path)}: {e}")
-    return info
-
-
-def load_meta():
-    path = os.path.join(ROOT, "meta.csv")
-    meta = {}
-    if not os.path.exists(path):
-        return meta
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        for row in csv.DictReader(f):
-            key = (row.get("file") or "").strip()
-            if not key or key.startswith("#"):
-                continue
-            meta[os.path.splitext(key)[0].lower() if os.path.splitext(key)[1].lower() in AUDIO_EXT else key.lower()] = \
-                {k: (v or "").strip() for k, v in row.items() if k and k != "file"}
-    return meta
-
-
-def find_cover(stem, folder):
-    for d in (COVERS, folder):
-        for ext in IMG_EXT:
-            p = os.path.join(d, stem + ext)
-            if os.path.exists(p):
-                return rel(p)
-    if folder != MUSIC:  # album folder art
-        for name in ("cover", "folder", "Cover", "Folder"):
-            for ext in IMG_EXT:
-                p = os.path.join(folder, name + ext)
-                if os.path.exists(p):
-                    return rel(p)
-    return None
+        f = mutagen.File(path)
+        return round(float(f.info.length)) if f and getattr(f, "info", None) else None
+    except Exception:
+        return None
 
 
 def build_songs():
-    meta = load_meta()
+    song_covers = {**image_index(D("COVERS")), **image_index(D("COVERS", "songs"))}
     songs = []
-    for dirpath, _, files in os.walk(MUSIC):
+    for dirpath, _, files in os.walk(D("MUSIC")):
         for fn in sorted(files):
             stem, ext = os.path.splitext(fn)
-            if ext.lower() not in AUDIO_EXT or fn.startswith("."):
+            if ext.lower() not in AUDIO_EXT or fn.startswith(("_", ".")):
                 continue
             path = os.path.join(dirpath, fn)
-            artist, title, year = parse_name(stem)
-            album = os.path.basename(dirpath) if dirpath != MUSIC else None
-            song = {"title": title, "artist": artist, "album": album, "year": year, "genre": None, "duration": None}
-            song.update({k: v for k, v in read_tags(path).items() if v})
-            m = meta.get(stem.lower()) or {}
-            for k in ("title", "artist", "album", "genre", "added"):
-                if m.get(k):
-                    song[k] = m[k]
-            if m.get("year", "").isdigit():
-                song["year"] = int(m["year"])
-            lyr_path = os.path.join(LYR, stem + ".txt")
-            song.update({
-                "id": uid("s", rel(path), stem),
+            info = parse_name(stem)
+            if not info:
+                warnings.append(f'Name not in the expected format, used as title only: "{fn}"')
+                info = dict(title=words(stem), artists=["Unknown artist"], year=None, date=None, dateText=None, genre=None)
+            lyr = D("LYR", stem + ".txt")
+            songs.append({
+                "id": uid("s", rel(path)),
                 "file": rel(path),
-                "artists": split_artists(song["artist"]),
-                "album": song.get("album") or song["title"],  # singles act as their own album
-                "added": song.get("added") or file_date(path),
-                "cover": find_cover(stem, dirpath),
-                "lyrics": read_text(lyr_path) if os.path.exists(lyr_path) else None,
-                "_stem": stem.lower(),
-                "_fn": fn.lower(),
+                "title": info["title"],
+                "artist": ", ".join(info["artists"]),
+                "artists": info["artists"],
+                "year": info["year"],
+                "date": info["date"],
+                "dateText": info["dateText"],
+                "genre": info["genre"],
+                "duration": duration(path),
+                "added": file_date(path),
+                "cover": song_covers.get(key(stem)),
+                "lyrics": read_text(lyr) if os.path.exists(lyr) else None,
+                "_stem": stem,
             })
-            songs.append(song)
     songs.sort(key=lambda s: (s["artist"].lower(), s["title"].lower()))
     return songs
 
 
-def build_playlists(songs):
-    playlists = []
-    if not os.path.isdir(PLAYLISTS):
-        return playlists
-    by_name = {}
+def build_artists(songs):
+    covers = image_index(D("COVERS", "artists"))
+    out = {}
     for s in songs:
-        by_name[s["_stem"]] = s
-        by_name[s["_fn"]] = s
-        by_name[s["file"].lower()] = s
-        by_name[f'{s["artist"]} - {s["title"]}'.lower()] = s
-    for fn in sorted(os.listdir(PLAYLISTS)):
-        if not fn.lower().endswith(".txt"):
+        for a in s["artists"]:
+            if a not in out and covers.get(key(a)):
+                out[a] = {"cover": covers[key(a)]}
+    return out
+
+
+def build_playlists(songs):
+    covers = image_index(D("COVERS", "playlists"))
+    covers.update({k: v for k, v in image_index(D("PLAYLISTS")).items()})
+    by = {}
+    for s in songs:
+        for k in (s["_stem"], s["file"], os.path.basename(s["file"]), s["title"], f'{s["title"]} {s["artist"]}'):
+            by.setdefault(key(k), s)
+    out = []
+    folder = D("PLAYLISTS")
+    if not os.path.isdir(folder):
+        return out
+    for fn in sorted(os.listdir(folder)):
+        if not fn.lower().endswith(".txt") or fn.startswith(("_", ".")):
             continue
-        path = os.path.join(PLAYLISTS, fn)
         stem = os.path.splitext(fn)[0]
-        pl = {"id": uid("p", stem), "title": stem, "description": "", "section": None,
-              "cover": None, "created": None, "songs": []}
-        for raw in read_text(path).splitlines():
+        pl = {"id": uid("p", stem), "title": stem, "description": "", "section": None, "cover": None, "created": None, "songs": []}
+        for raw in read_text(os.path.join(folder, fn)).splitlines():
             line = raw.strip()
             if not line:
                 continue
@@ -205,53 +215,47 @@ def build_playlists(songs):
                 if m and m.group(1).lower() in ("title", "description", "section", "cover", "created"):
                     pl[m.group(1).lower()] = m.group(2).strip() or None
                 continue
-            rule = re.match(r"^(artist|genre|year|album)\s*:\s*(.+)$", line, re.I)
+            rule = re.match(r"^(artist|genre|year)\s*:\s*(.+)$", line, re.I)
             if rule:
-                key, val = rule.group(1).lower(), rule.group(2).strip().lower()
+                k, v = rule.group(1).lower(), key(rule.group(2))
                 for s in songs:
-                    hit = (key == "artist" and any(a.lower() == val for a in s["artists"])) or \
-                          (key == "genre" and (s.get("genre") or "").lower() == val) or \
-                          (key == "year" and str(s.get("year") or "") == val) or \
-                          (key == "album" and (s.get("album") or "").lower() == val)
+                    hit = (k == "artist" and any(key(a) == v for a in s["artists"])) or \
+                          (k == "genre" and key(s["genre"] or "") == v) or (k == "year" and str(s["year"] or "") == v)
                     if hit and s["id"] not in pl["songs"]:
                         pl["songs"].append(s["id"])
                 continue
             if line == "*":
                 pl["songs"] += [s["id"] for s in songs if s["id"] not in pl["songs"]]
                 continue
-            s = by_name.get(line.lower()) or by_name.get(os.path.splitext(line)[0].lower())
+            s = by.get(key(os.path.splitext(line)[0] if os.path.splitext(line)[1].lower() in AUDIO_EXT else line))
             if s:
                 if s["id"] not in pl["songs"]:
                     pl["songs"].append(s["id"])
             else:
                 warnings.append(f'Playlist "{fn}": song not found -> "{line}"')
-        if pl["cover"] and not os.path.exists(os.path.join(ROOT, pl["cover"])):
+        if pl["cover"] and not os.path.exists(D(pl["cover"])):
             warnings.append(f'Playlist "{fn}": cover not found -> {pl["cover"]}')
             pl["cover"] = None
-        if not pl["cover"]:
-            for ext in IMG_EXT:
-                p = os.path.join(PLAYLISTS, stem + ext)
-                if os.path.exists(p):
-                    pl["cover"] = rel(p)
-        pl["created"] = pl["created"] or file_date(path)
-        playlists.append(pl)
-    return playlists
+        pl["cover"] = pl["cover"] or covers.get(key(stem))
+        pl["created"] = pl["created"] or file_date(os.path.join(folder, fn))
+        out.append(pl)
+    return out
 
 
 def main():
-    for d in (MUSIC, COVERS, LYR, PLAYLISTS):
-        os.makedirs(d, exist_ok=True)
+    for d in ("MUSIC", "COVERS/songs", "COVERS/artists", "COVERS/playlists", "LYR", "PLAYLISTS"):
+        os.makedirs(D(d), exist_ok=True)
     songs = build_songs()
     playlists = build_playlists(songs)
+    artists = build_artists(songs)
     for s in songs:
-        s.pop("_stem"); s.pop("_fn")
+        s.pop("_stem")
     data = {"generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "songs": songs, "playlists": playlists}
-    with open(os.path.join(ROOT, "library.js"), "w", encoding="utf-8") as f:
+            "songs": songs, "artists": artists, "playlists": playlists}
+    with open(D("library.js"), "w", encoding="utf-8") as f:
         f.write("/* AUTO-GENERATED by build_library.py - do not edit by hand */\n")
         f.write("window.LIBRARY = " + json.dumps(data, ensure_ascii=False, indent=1) + ";\n")
-    print(f"library.js written: {len(songs)} songs, {len(playlists)} playlists"
-          + ("" if mutagen else "  (tip: pip install mutagen to also read tags/durations)"))
+    print(f"library.js written: {len(songs)} songs, {len(artists)} artist photos, {len(playlists)} playlists")
     for w in warnings:
         print("WARNING:", w)
 

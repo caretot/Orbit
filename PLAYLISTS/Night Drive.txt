@@ -2,7 +2,7 @@
 # description: Late-night highway songs. Template - edit me.
 # section: Made for the road
 # created: 2026-10-01
-Neon Harbor - Midnight Lanes (2026)
-Kairo - Afterglow Drive (2027)
-Lumen Vale, Kairo - Overpass (2026)
-Neon Harbor - Glass City (2025)
+Midnight-Lanes_Neon-Harbor_12_March_2026_Synthwave
+Bomba-Xeyallar_Fuad-Ildarov_4_November_2025_Pop
+Overpass_Lumen-Vale&Kairo_8_February_2026_Electronic
+Glass-City_Neon-Harbor_3_June_2025_Synthwave
