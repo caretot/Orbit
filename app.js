@@ -9,7 +9,7 @@
 /* ---------------- basics ---------------- */
 const SITE = Object.assign({ name: 'ORBIT', tagline: '', owner: '', contact: {}, about: '', terms: [], defaultPalette: 'evergreen', defaultMode: 'dark' }, window.SITE || {});
 const LIB = window.LIBRARY || { songs: [], playlists: [], artists: {}, generated: null };
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -26,13 +26,12 @@ const fmt = (sec) => { if (!isFinite(sec) || sec < 0) return '0:00'; sec = Math.
 const fmtLong = (sec) => { const m = Math.max(1, Math.round(sec / 60)); if (m < 60) return `${m} min`; return `${Math.floor(m / 60)} hr ${m % 60} min`; };
 const enc64 = (s) => encodeURIComponent(s);
 
-/* share codes: playlist snapshot packed into the link (no server needed) */
 const packCode = (obj) => btoa(unescape(encodeURIComponent(JSON.stringify(obj)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const unpackCode = (code) => { try { const b = String(code).replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(decodeURIComponent(escape(atob(b + '==='.slice((b.length + 3) % 4))))); } catch { return null; } };
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('orbit.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem('orbit.' + k, JSON.stringify(v)); } catch { /* storage full / private mode */ } },
+  set(k, v) { try { localStorage.setItem('orbit.' + k, JSON.stringify(v)); } catch { } },
   del(k) { try { localStorage.removeItem('orbit.' + k); } catch { } },
 };
 
@@ -47,7 +46,7 @@ const PALETTES = {
   mono:      { name: 'Mono',          sw: ['#000000', '#1C1C1C', '#FFFFFF', '#9A9A9A', '#FAFAFA'] },
 };
 
-/* ---------------- icons (original line set) ---------------- */
+/* ---------------- icons ---------------- */
 const P_ = (d, extra = '') => `<path d="${d}" ${extra}/>`;
 const ICONS = {
   logo: `<circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><ellipse cx="12" cy="12" rx="10" ry="4.6" transform="rotate(-28 12 12)"/><circle cx="20.2" cy="7.6" r="1.4" fill="currentColor" stroke="none"/>`,
@@ -108,13 +107,15 @@ const ICONS = {
   crown: P_('M3.5 8l4.2 3.5L12 5l4.3 6.5L20.5 8l-1.8 10.5H5.3z', 'fill="currentColor"'),
 };
 const I = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+/* explicit badge: shown when a song file name ends with _E */
+const eBadge = (s, cls = '') => s && s.explicit ? `<span class="badge-e ${cls}" title="Explicit" aria-label="Explicit">E</span>` : '';
 
 /* ---------------- library indexes ---------------- */
 const SONGS = [];
 const SONG = new Map();
 const PLAYLISTS = [];
 const PL = new Map();
-const ARTISTS = new Map();   // name -> {name, songs:[], cover}
+const ARTISTS = new Map();
 const GENRES = new Map();
 const YEARS = new Map();
 const durCache = store.get('dur', {});
@@ -122,6 +123,13 @@ const dur = (s) => (s && (s.duration || durCache[s.id])) || 0;
 
 function indexSong(s) {
   if (!s || !s.id || !s.file || SONG.has(s.id)) return;
+  /* older builds: "_E" may have ended up inside the genre, or only in the file name */
+  if (s.explicit === undefined) {
+    const fn = String(s.fileName || s.file || '');
+    s.explicit = /_E\.[a-z0-9]+$/i.test(fn) || /(^|\s)E$/.test(String(s.genre || ''));
+    if (s.genre && /(^|\s)E$/.test(s.genre)) s.genre = s.genre.replace(/\s*E$/, '') || null;
+  }
+  s.explicit = !!s.explicit;
   s.artists = s.artists && s.artists.length ? s.artists : [s.artist || 'Unknown artist'];
   s.artist = s.artist || s.artists.join(', ');
   SONGS.push(s); SONG.set(s.id, s);
@@ -138,7 +146,7 @@ function buildHaystacks() {
   for (const s of SONGS) {
     const inPl = PLAYLISTS.filter((p) => p.songs.includes(s.id)).map((p) => p.title).join(' ');
     s._t = norm(s.title); s._a = norm(s.artist); s._g = norm(s.genre);
-    s._hay = norm([s.title, s.artist, s.genre, s.year, s.dateText, inPl].join(' '));
+    s._hay = norm([s.title, s.artist, s.genre, s.year, s.dateText, inPl, s.explicit ? 'explicit' : ''].join(' '));
     s._words = s._hay.split(' ');
     s._ly = s.lyrics ? norm(s.lyrics) : '';
   }
@@ -253,7 +261,6 @@ function collCover(c, cls = '') {
   return `<div class="cover ${cls}">${ph(c.title, c.title)}</div>`;
 }
 
-/* dominant colour of artwork -> background tint (null = use palette default) */
 const tintCache = new Map();
 function tintFor(src) {
   if (!src) return Promise.resolve(null);
@@ -287,7 +294,6 @@ function rgb2hsl(r, g, b) {
 const setTint = (el, c) => { if (!el) return; if (c) el.style.setProperty('--tint', c); else el.style.removeProperty('--tint'); };
 const collCoverSrc = (c) => c.cover || (c.type === 'track' ? c.song.cover : c.songs.map((id) => SONG.get(id)?.cover).find(Boolean)) || null;
 
-/* ---------------- toast ---------------- */
 let toastT;
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
@@ -296,11 +302,9 @@ function toast(msg) {
 
 /* =========================================================
    Premium vault (password-protected, encrypted content)
-   The VAULT/ folder on GitHub only contains encrypted data.
-   Nothing can be read without the password: no song names,
-   no artists, no audio. The password itself is NOT stored on
-   GitHub; after unlocking, only the derived key is remembered
-   in this browser.
+   VAULT/ on GitHub only contains encrypted data. The password
+   is NOT stored on GitHub; after unlocking only the derived key
+   is remembered in this browser.
    ========================================================= */
 const VAULT_URL = 'VAULT/vault.bin';
 const V = { key: null, loaded: false, urls: new Map(), pending: new Map(), count: 0 };
@@ -348,7 +352,6 @@ async function mergeVault(m) {
   buildHaystacks();
   V.loaded = true; V.count = songs.length;
 }
-/* decrypted audio is kept in memory for a few songs only */
 function vaultURL(s) {
   if (V.urls.has(s.id)) return Promise.resolve(V.urls.get(s.id));
   if (V.pending.has(s.id)) return V.pending.get(s.id);
@@ -383,7 +386,6 @@ const PS = {
 const songURL = (s) => enc(s.file);
 const isPlaying = () => !audio.paused && !audio.ended && !isSilent();
 const sameCtx = (type, id) => !!PS.ctx && PS.ctx.type === type && String(PS.ctx.id) === String(id ?? '');
-/* tiny silent sound: lets iPhone start encrypted songs that need a moment to decrypt */
 const SILENT = (() => { const n = 800, b = new Uint8Array(44 + n), v = new DataView(b.buffer); const w = (o, s) => [...s].forEach((c, i) => b[o + i] = c.charCodeAt(0));
   w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true); b.fill(128, 44);
   return 'data:audio/wav;base64,' + b64(b); })();
@@ -479,6 +481,7 @@ function addToQueue(ids, front = false) {
   PS.manual = front ? [...ids, ...PS.manual] : [...PS.manual, ...ids];
   toast(front ? 'Playing next' : ids.length > 1 ? `${ids.length} songs added to queue` : 'Added to queue');
   saveState();
+  if (elOv.classList.contains('queue-o')) openQueue();
 }
 function seek(t) { if (isFinite(t) && !isSilent()) audio.currentTime = clamp(t, 0, audio.duration || t); }
 
@@ -515,7 +518,6 @@ audio.addEventListener('error', () => {
   if (PS.want && ++PS.errs < Math.min(6, PS.queue.length + PS.manual.length)) setTimeout(() => next(false), 900);
 });
 
-/* lock screen / car / headphones controls */
 const MS = 'mediaSession' in navigator ? navigator.mediaSession : null;
 if (MS) {
   const h = (a, f) => { try { MS.setActionHandler(a, f); } catch { } };
@@ -536,7 +538,6 @@ function updatePosition() {
   try { MS.setPositionState({ duration: audio.duration, playbackRate: audio.playbackRate || 1, position: Math.min(audio.currentTime, audio.duration) }); } catch { }
 }
 
-/* sleep timer */
 function setSleep(min) {
   if (min === 0) PS.sleep = null;
   else if (min === 'eot') PS.sleep = { eot: true };
@@ -546,7 +547,6 @@ function setSleep(min) {
 }
 setInterval(() => { if (PS.sleep?.until) updateSleep(); }, 30000);
 
-/* restore last session (paused) */
 function restore() {
   if (!U.settings.resume || !saved || !saved.cur || !SONG.has(saved.cur)) return;
   PS.ctx = saved.ctx;
@@ -559,8 +559,7 @@ function restore() {
 }
 
 /* =========================================================
-   Offline downloads (Cache Storage + service worker)
-   Premium songs are stored encrypted, exactly as on GitHub.
+   Offline downloads
    ========================================================= */
 const MEDIA_CACHE = 'orbit-media-v1';
 const canCache = 'caches' in window && window.isSecureContext && location.protocol !== 'file:';
@@ -664,7 +663,7 @@ function buildPlayerUI() {
   elPlayer.innerHTML = `
     <div class="m-swipe" data-act="open-full">
       <div class="cover m-cover" id="m-cover"></div>
-      <div class="m-body"><div class="m-title ellipsis" id="m-title"></div><div class="m-sub ellipsis" id="m-sub"></div></div>
+      <div class="m-body"><div class="m-title ellipsis" id="m-title"></div><div class="m-sub" id="m-sub"></div></div>
       <button class="icon-btn sm d-only" data-act="like-cur" data-likebtn aria-label="Like">${I('heart')}</button>
     </div>
     <button class="icon-btn m-only" data-act="like-cur" data-likebtn aria-label="Like">${I('heart')}</button>
@@ -698,7 +697,7 @@ function buildPlayerUI() {
       <div class="f-left">
         <div class="f-art" id="f-art"><div class="cover" id="f-cover"></div></div>
         <div class="f-meta">
-          <div class="f-text"><h2 class="ellipsis" id="f-title"></h2><div class="f-artist ellipsis" id="f-artist" data-act="goto-artist"></div></div>
+          <div class="f-text"><h2 class="ellipsis" id="f-title"></h2><div class="f-artist" id="f-artist" data-act="goto-artist"></div></div>
           <button class="icon-btn" data-act="like-cur" data-likebtn aria-label="Like">${I('heart')}</button>
         </div>
         <div class="seek">
@@ -757,17 +756,17 @@ function updateNowPlaying() {
   if (!s) return;
   $('#m-cover').innerHTML = s.cover ? img(s.cover) : ph(s.title);
   $('#m-title').textContent = s.title;
-  $('#m-sub').textContent = s.artist;
+  $('#m-sub').innerHTML = `${eBadge(s)}<span>${esc(s.artist)}</span>`;
   $('#f-cover').innerHTML = s.cover ? img(s.cover) : ph(s.title);
   $('#f-title').textContent = s.title;
-  $('#f-artist').textContent = s.artist;
+  $('#f-artist').innerHTML = `${eBadge(s, 'lg')}<span>${esc(s.artist)}</span>`;
   const kinds = { playlist: 'Playing from playlist', local: 'Playing from playlist', shared: 'Playing from playlist', liked: 'Playing from playlist', downloads: 'Playing from playlist', artist: 'Playing from artist', search: 'Playing from search', warp: 'Warp mode', track: 'Playing song', queue: 'Playing from queue', genre: 'Playing from mix', year: 'Playing from mix' };
   $('#f-ctx-kind').textContent = kinds[PS.ctx?.type] || 'Playing from';
   $('#f-ctx').textContent = PS.ctx?.title || SITE.name;
   const lc = $('#f-lyrics');
   lc.classList.toggle('hidden', !(U.settings.showLyrics && s.lyrics));
   lc.innerHTML = s.lyrics ? `<h4>Lyrics <span style="font-size:12px;font-weight:500;opacity:.7">Tap to expand</span></h4><div class="lyr-preview">${esc(s.lyrics)}</div>` : '';
-  const rows = [['Artist', s.artist], ['Released', s.dateText || s.year], ['Genre', s.genre], ['Added', s.vault ? null : s.added], ['Length', dur(s) ? fmt(dur(s)) : null]].filter((r) => r[1]);
+  const rows = [['Artist', s.artist], ['Released', s.dateText || s.year], ['Genre', s.genre], ['Content', s.explicit ? 'Explicit' : null], ['Added', s.vault ? null : s.added], ['Length', dur(s) ? fmt(dur(s)) : null]].filter((r) => r[1]);
   $('#f-about').innerHTML = `<h4>About this song</h4><dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
   const want = s.cover;
   tintFor(s.cover).then((c) => { if (SONG.get(PS.cur)?.cover !== want) return; [elPlayer, elFull, elOv].forEach((e) => setTint(e, c)); });
@@ -818,37 +817,89 @@ function openFull() { if (!PS.cur) return; elFull.classList.add('open'); elFull.
 function closeFull() { elFull.classList.remove('open'); elFull.setAttribute('aria-hidden', 'true'); if (!elOv.classList.contains('open')) document.body.classList.remove('lock'); }
 
 function openOverlay(cls, html) {
+  const keep = elOv.classList.contains(cls) ? elOv.scrollTop : 0;
   elOv.className = 'overlay open ' + cls; elOv.innerHTML = `<div class="o-inner">${html}</div>`; elOv.setAttribute('aria-hidden', 'false');
+  elOv.scrollTop = keep;
   document.body.classList.add('lock');
 }
 function closeOverlay() { elOv.className = 'overlay'; elOv.setAttribute('aria-hidden', 'true'); if (!elFull.classList.contains('open')) document.body.classList.remove('lock'); }
 function openLyrics(id) {
   const s = SONG.get(id || PS.cur); if (!s) return;
-  const wasOpen = elOv.classList.contains('lyrics');
   openOverlay('lyrics', `
     <div class="o-top"><button class="icon-btn" data-act="close-ov" aria-label="Close">${I('down')}</button>
       <div class="o-title ellipsis">${esc(s.title)}<div style="font-weight:500;font-size:13px;opacity:.7">${esc(s.artist)}</div></div>
       <button class="icon-btn" data-act="share-song" data-song="${esc(s.id)}" aria-label="Share">${I('share')}</button></div>
     ${s.lyrics ? `<div class="lyr-full">${esc(s.lyrics)}</div>` : `<div class="empty">${I('mic')}<h3>No lyrics yet</h3><p>Lyrics for this song haven't been added.</p></div>`}`);
-  if (!wasOpen) elOv.scrollTop = 0;
 }
 function openQueue() {
   const cur = SONG.get(PS.cur);
   const upNext = PS.queue.slice(PS.idx + 1);
   const row = (id, i, kind) => { const s = SONG.get(id); if (!s) return ''; return `
     <div class="track" role="button" data-act="queue-jump" data-kind="${kind}" data-i="${i}" data-song="${esc(id)}">
-      ${songCover(s)}<div class="t-body"><div class="t-title ellipsis">${esc(s.title)}</div><div class="t-sub"><span class="ellipsis">${esc(s.artist)}</span></div></div>
+      ${songCover(s)}<div class="t-body"><div class="t-title ellipsis">${esc(s.title)}</div><div class="t-sub">${eBadge(s)}<span class="ellipsis">${esc(s.artist)}</span></div></div>
       ${kind === 'm' ? `<button class="icon-btn sm" data-act="queue-remove" data-i="${i}" aria-label="Remove">${I('close')}</button>` : ''}
     </div>`; };
   openOverlay('queue-o', `
     <div class="o-top"><button class="icon-btn" data-act="close-ov" aria-label="Close">${I('down')}</button><div class="o-title">Queue</div><span style="width:40px"></span></div>
-    ${cur ? `<div class="q-label">Now playing</div><div class="tracks">${trackRow(cur, {})}</div>` : '<p class="muted">Nothing playing.</p>'}
+    ${cur ? `<div class="q-label">Now playing</div><div class="tracks">${trackRow(cur, { noswipe: true })}</div>` : '<p class="muted">Nothing playing.</p>'}
     ${PS.manual.length ? `<div class="q-label"><span>Next in queue</span><button class="muted" style="font-size:13px" data-act="queue-clear">Clear</button></div><div class="tracks">${PS.manual.map((id, i) => row(id, i, 'm')).join('')}</div>` : ''}
     ${cur ? `<div class="q-label"><span>Next from<small>${esc(PS.ctx?.title || '')}</small></span></div>
     <div class="tracks">${upNext.length ? upNext.slice(0, 150).map((id, i) => row(id, PS.idx + 1 + i, 'c')).join('') : '<p class="muted">Nothing else in this list.</p>'}</div>
     <div class="actions"><button class="btn-pill" data-act="shuffle" data-shufflebtn>${I('shuffle')} Shuffle</button><button class="btn-pill" data-act="repeat">${I('repeat')} Repeat</button></div>` : ''}`);
   updateModes(); markNowPlaying();
 }
+
+/* =========================================================
+   Swipe a song row to the RIGHT -> add to queue (touch only)
+   ========================================================= */
+(() => {
+  const ARM = 72;            // px needed to trigger
+  let st = null;             // { el, id, x0, y0, dx, mode, pid }
+  const reset = (el) => {
+    el.classList.add('swipe-back'); el.style.transform = '';
+    el.classList.remove('armed');
+    setTimeout(() => { el.classList.remove('swiping', 'swipe-back'); el.style.removeProperty('--sx'); }, 260);
+  };
+  document.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' || !e.isPrimary) return;
+    const el = e.target.closest('.track[data-swipe]');
+    if (!el || e.target.closest('[data-act="track-more"]')) return;
+    st = { el, id: el.dataset.song, x0: e.clientX, y0: e.clientY, dx: 0, mode: null, pid: e.pointerId };
+  }, { passive: true });
+  document.addEventListener('pointermove', (e) => {
+    if (!st || e.pointerId !== st.pid) return;
+    const dx = e.clientX - st.x0, dy = e.clientY - st.y0;
+    if (!st.mode) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      st.mode = dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.2 ? 'h' : 'v';
+      if (st.mode === 'v') { st = null; return; }
+      st.el.classList.add('swiping');
+      try { st.el.setPointerCapture(st.pid); } catch { }
+    }
+    const x = Math.max(0, Math.min(dx, 150));
+    const eased = x > ARM ? ARM + (x - ARM) * 0.35 : x;
+    st.dx = x;
+    st.el.style.transform = `translateX(${eased}px)`;
+    st.el.style.setProperty('--sx', eased + 'px');
+    const armed = x >= ARM;
+    if (armed !== st.el.classList.contains('armed')) { st.el.classList.toggle('armed', armed); if (armed && navigator.vibrate) navigator.vibrate(8); }
+  }, { passive: true });
+  const end = (e) => {
+    if (!st || (e && e.pointerId !== st.pid)) return;
+    const { el, id, dx, mode } = st; st = null;
+    if (mode !== 'h') return;
+    el._swipedAt = Date.now();
+    if (dx >= ARM && e.type === 'pointerup') addToQueue([id]);
+    reset(el);
+  };
+  document.addEventListener('pointerup', end);
+  document.addEventListener('pointercancel', end);
+  /* a swipe must not also count as a tap */
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('.track[data-swipe]');
+    if (el && el._swipedAt && Date.now() - el._swipedAt < 400) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+})();
 
 /* =========================================================
    Router + views
@@ -917,14 +968,14 @@ const mainTop = (title, right = '') => `<header class="topbar">${logoBtn()}<h1 c
 const section = (title, inner, opts = {}) => inner ? `<section class="section"><div class="section-head"><div style="min-width:0">${opts.kicker ? `<span class="kicker">${esc(opts.kicker)}</span>` : ''}<h2 class="ellipsis">${esc(title)}</h2></div>${opts.more ? `<button data-href="${opts.more}">Show all</button>` : ''}</div>${inner}</section>` : '';
 const premiumBadge = (c) => c && c.vault ? `<span class="badge-p" title="Premium">${I('crown')}</span>` : '';
 const cardColl = (c, pick = '') => `<button class="card${c.round ? ' round' : ''}" data-href="${collHref(c)}"${pick ? ` data-pick="${pick}"` : ''}>${collCover(c)}<div class="c-title ellipsis">${esc(c.title)}</div><div class="c-sub">${esc(c.round ? collSub(c) : c.desc || collSub(c))}</div></button>`;
-const cardSong = (s, type, id = '') => `<button class="card" data-act="play-track" data-type="${type}" data-id="${esc(id)}" data-song="${esc(s.id)}">${songCover(s)}<div class="c-title ellipsis">${esc(s.title)}</div><div class="c-sub">${esc(s.artist)}${s.year ? ' · ' + s.year : ''}</div></button>`;
+const cardSong = (s, type, id = '') => `<button class="card" data-act="play-track" data-type="${type}" data-id="${esc(id)}" data-song="${esc(s.id)}">${songCover(s)}<div class="c-title ellipsis">${esc(s.title)}</div><div class="c-sub">${eBadge(s)}${esc(s.artist)}${s.year ? ' · ' + s.year : ''}</div></button>`;
 const row = (items) => items.length ? `<div class="row">${items.join('')}</div>` : '';
 function trackRow(s, o = {}) {
   const d = dur(s);
-  return `<div class="track${s.id === PS.cur ? ' now' : ''}" role="button" tabindex="0" data-act="play-track" data-type="${o.type || 'track'}" data-id="${esc(o.id ?? s.id)}" data-song="${esc(s.id)}"${o.pick ? ` data-pick="song:${esc(s.id)}"` : ''}>
+  return `<div class="track${s.id === PS.cur ? ' now' : ''}" role="button" tabindex="0"${o.noswipe ? '' : ' data-swipe'} data-act="play-track" data-type="${o.type || 'track'}" data-id="${esc(o.id ?? s.id)}" data-song="${esc(s.id)}"${o.pick ? ` data-pick="song:${esc(s.id)}"` : ''}>
     ${songCover(s)}
     <div class="t-body"><div class="t-title ellipsis">${o.hlTitle || esc(s.title)}</div>
-      <div class="t-sub"><span class="eq"><i></i><i></i><i></i></span>${U.dl.has(s.id) ? I('dlFill') : ''}<span class="ellipsis">${o.sub || esc(s.artist)}</span></div>${o.snippet || ''}</div>
+      <div class="t-sub"><span class="eq"><i></i><i></i><i></i></span>${U.dl.has(s.id) ? I('dlFill') : ''}${eBadge(s)}<span class="ellipsis">${o.sub || esc(s.artist)}</span></div>${o.snippet || ''}</div>
     <span class="t-dur">${d ? fmt(d) : ''}</span>
     <button class="icon-btn sm" data-act="track-more" data-song="${esc(s.id)}" data-type="${o.type || ''}" data-id="${esc(o.id ?? '')}" aria-label="More options">${I('more')}</button>
   </div>`;
@@ -1032,7 +1083,7 @@ function renderResults() {
       const s = x.kind === 'song' ? SONG.get(x.id) : null, c = x.kind !== 'song' ? coll(x.kind, x.id) : null;
       if (!s && !c) return '';
       const href = s ? `data-act="play-track" data-type="track" data-id="${esc(s.id)}" data-song="${esc(s.id)}"` : `data-href="${collHref(c)}"`;
-      return `<div class="recent-row track${c && c.round ? ' round' : ''}" role="button" ${href}>${s ? songCover(s) : collCover(c)}<div class="t-body"><div class="t-title ellipsis">${esc(s ? s.title : c.title)}</div><div class="t-sub"><span class="ellipsis">${esc(s ? 'Song · ' + s.artist : collSub(c))}</span></div></div><button class="icon-btn sm" data-act="search-forget" data-i="${i}" aria-label="Remove">${I('close')}</button></div>`;
+      return `<div class="recent-row track${c && c.round ? ' round' : ''}" role="button" ${href}>${s ? songCover(s) : collCover(c)}<div class="t-body"><div class="t-title ellipsis">${esc(s ? s.title : c.title)}</div><div class="t-sub">${s ? eBadge(s) : ''}<span class="ellipsis">${esc(s ? 'Song · ' + s.artist : collSub(c))}</span></div></div><button class="icon-btn sm" data-act="search-forget" data-i="${i}" aria-label="Remove">${I('close')}</button></div>`;
     }).join('');
     const tiles = [
       ['All songs', '#/all'], ['Latest', '#/latest'], ['Liked Songs', '#/liked'],
@@ -1068,7 +1119,7 @@ function renderResults() {
   let out = '';
   if (top) {
     out += section('Top result', top.kind === 'song'
-      ? `<div class="top-result" role="button" data-act="play-track" data-type="search" data-id="${esc(q)}" data-song="${esc(top.s.id)}" data-pick="song:${esc(top.s.id)}">${songCover(top.s)}<h3 class="ellipsis">${esc(top.s.title)}</h3><div class="muted">Song · <b style="color:var(--text)">${esc(top.s.artist)}</b></div><span class="btn-play">${I('play')}</span></div>`
+      ? `<div class="top-result" role="button" data-act="play-track" data-type="search" data-id="${esc(q)}" data-song="${esc(top.s.id)}" data-pick="song:${esc(top.s.id)}">${songCover(top.s)}<h3 class="ellipsis">${esc(top.s.title)}</h3><div class="muted">${eBadge(top.s)}Song · <b style="color:var(--text)">${esc(top.s.artist)}</b></div><span class="btn-play">${I('play')}</span></div>`
       : `<div class="top-result${top.c.round ? ' round' : ''}" role="button" data-href="${collHref(top.c)}" data-pick="${top.kind}:${esc(top.c.id)}">${collCover(top.c)}<h3 class="ellipsis">${esc(top.c.title)}</h3><div class="muted">${esc(collSub(top.c))}</div><span class="btn-play" data-act="play-coll" data-type="${top.c.type}" data-id="${esc(top.c.id)}" data-playbtn>${I('play')}</span></div>`);
   }
   out += section('Songs', `<div class="tracks">${R.songs.slice(0, 6).map(songRow).join('')}</div>${R.songs.length > 6 ? `<button class="btn-pill" style="margin-top:8px" data-act="schip" data-v="songs">See all ${R.songs.length} songs</button>` : ''}`);
@@ -1139,7 +1190,7 @@ function bindLibFind(focus) {
   i.addEventListener('input', () => { LS.q = i.value; const pos = i.selectionStart; render(true); const j = $('#libq'); if (j) { j.focus(); j.setSelectionRange(pos, pos); } });
 }
 
-/* ---------- COLLECTION (playlist / artist / mix / song / shared) ---------- */
+/* ---------- COLLECTION ---------- */
 const CS = {};
 const SORTS = [['custom', 'Custom order'], ['title', 'Title'], ['artist', 'Artist'], ['release', 'Release date'], ['added', 'Recently added']];
 function viewColl(type, id) {
@@ -1158,7 +1209,7 @@ function viewColl(type, id) {
   const n = c.songs.length, songsTxt = `${n} song${n === 1 ? '' : 's'}`;
   let meta;
   if (c.type === 'artist') meta = `${premiumBadge(c)}${songsTxt}${known && t ? ' · ' + fmtLong(t) : ''}`;
-  else if (c.type === 'track') meta = `<b>${esc(c.song.artist)}</b>${c.song.dateText ? ' · ' + esc(c.song.dateText) : ''}${c.song.genre ? ' · ' + esc(c.song.genre) : ''}${dur(c.song) ? ' · ' + fmt(dur(c.song)) : ''}`;
+  else if (c.type === 'track') meta = `${eBadge(c.song, 'lg')}<b>${esc(c.song.artist)}</b>${c.song.dateText ? ' · ' + esc(c.song.dateText) : ''}${c.song.genre ? ' · ' + esc(c.song.genre) : ''}${dur(c.song) ? ' · ' + fmt(dur(c.song)) : ''}`;
   else meta = `${c.vault ? premiumBadge(c) : `<span class="mini-logo">${I('logo')}</span>`}<b>${c.local || c.special === 'liked' ? 'You' : c.shared ? 'A friend' : esc(SITE.name)}</b> · ${songsTxt}${known && t ? ', ' + fmtLong(t) : ''}`;
 
   let out = `<div class="page">${backTop(c.title, type, id)}
@@ -1217,7 +1268,7 @@ function premiumBlock(li) {
     </div>`;
   return `<div class="list-group">
       ${li('lock', 'Premium content', 'Enter the password to unlock hidden playlists. You only need to do this once on each device.')}
-      <form class="premium-form" data-form="vault"><label class="field">${I('lock')}<input id="vault-pw" type="password" placeholder="Password" autocomplete="current-password" enterkeyhint="go"></label><button class="btn-pill accent" type="submit">Unlock</button></form>
+      <form class="premium-form" data-form="vault"><label class="field">${I('lock')}<input id="vault-pw" type="password" placeholder="Password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go"></label><button class="btn-pill accent" type="submit">Unlock</button></form>
     </div>`;
 }
 function viewPage(name) {
@@ -1280,14 +1331,13 @@ function viewPage(name) {
       const faq = [
         ['Install it like an app (iPhone)', 'Open the site in Safari → tap the Share button → “Add to Home Screen”. It opens full-screen with its own icon, and your likes, playlists and downloads are kept more reliably.'],
         ['Does music keep playing with the screen locked?', 'Yes. Start a song, then lock the phone or switch apps. Control it from the lock screen, Control Centre, headphones, Bluetooth or CarPlay.'],
-        ['Playing in the car', 'Connect the phone via Bluetooth or CarPlay, open the site and press play. Song title, artist and cover appear on the car screen; next/previous buttons on the steering wheel work too.'],
+        ['Add a song to the queue quickly', 'Swipe a song to the right. When the bar turns green, let go and it is added to the queue. You can also use ··· → Add to queue.'],
+        ['What does the “E” mean?', 'E marks songs with explicit content.'],
         ['Listening offline', 'Tap the download arrow on a playlist (or ··· → Download on a song). Downloaded songs show a small arrow and play without internet.'],
         ['Sharing', 'Tap the share icon on any song, playlist or artist. Your own playlists and Liked Songs are shared as a snapshot: your friend opens the link and taps Save to keep a copy.'],
         ['What is Premium?', 'Some playlists are hidden. If you were given the password, open Settings → Premium (at the bottom) and enter it once. The device remembers it.'],
-        ['What can I search?', 'Song titles, artists, genres, playlist names, a line of the lyrics, a release year like 2026 or a month like “November 2025”. Small typos are forgiven.'],
-        ['Likes, playlists and history', 'Everything you like or create is saved only on this device and browser. Nobody else can see it.'],
-        ['Colours', 'Tap the logo → Settings → pick a palette and dark or light mode.'],
-        ['Gestures', 'Swipe the mini player or the big cover left/right to skip. Swipe the full player down to close it.'],
+        ['What can I search?', 'Song titles, artists, genres, playlist names, a line of the lyrics, a release year like 2026, a month like “November 2025”, or “explicit”.'],
+        ['Gestures', 'Swipe a song right to queue it. Swipe the mini player or the big cover left/right to skip. Swipe the full player down to close it.'],
         ['A song is missing or won’t play', 'Use Contact to tell the owner which one.'],
       ];
       return wrap('Help', faq.map(([q, a]) => `<details class="faq"><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join(''));
@@ -1351,7 +1401,7 @@ function trackMenu(id, type, cid) {
   const s = SONG.get(id); if (!s) return;
   const d = { song: id, type: type || '', id: cid || '' };
   const liked = isLiked(id), dl = U.dl.has(id);
-  openSheet(`<div class="s-head">${songCover(s)}<div style="min-width:0"><b class="ellipsis">${esc(s.title)}</b><span class="muted ellipsis" style="display:block">${esc(s.artist)}${s.dateText ? ' · ' + esc(s.dateText) : ''}</span></div></div>
+  openSheet(`<div class="s-head">${songCover(s)}<div style="min-width:0"><b class="ellipsis">${esc(s.title)}</b><span class="muted" style="display:flex;align-items:center;gap:5px;min-width:0">${eBadge(s)}<span class="ellipsis">${esc(s.artist)}${s.dateText ? ' · ' + esc(s.dateText) : ''}</span></span></div></div>
     ${sItem(liked ? 'heartFill' : 'heart', liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', 'like', d, liked)}
     ${sItem('addList', 'Add to playlist', 'addpl', d)}
     ${type === 'local' ? sItem('trash', 'Remove from this playlist', 'rmpl', d) : ''}

@@ -1,8 +1,8 @@
 /* ORBIT service worker: offline app shell + downloaded songs (with seeking support) */
-const SHELL = 'orbit-shell-v3';
+const SHELL = 'orbit-shell-v4';
 const MEDIA = 'orbit-media-v1';
 const IMAGES = 'orbit-img-v1';
-const SHELL_FILES = ['./', 'index.html', 'styles.css?v=1.2.0', 'app.js?v=1.2.0', 'config.js?v=1.2.0', 'library.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
+const SHELL_FILES = ['./', 'index.html', 'styles.css?v=1.3.0', 'app.js?v=1.3.0', 'config.js?v=1.3.0', 'library.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 const AUDIO_RE = /\.(mp3|m4a|aac|mp4|wav|ogg|oga|opus|flac|webm)$/i;
 const IMG_RE = /\.(jpe?g|png|webp|gif|svg)$/i;
 const VAULT_MEDIA_RE = /\/VAULT\/(?!vault\.bin$)[^/]+\.bin$/;
@@ -50,7 +50,7 @@ async function media(req, href) {
   if (start >= total) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${total}` } });
   return new Response(buf.slice(start, end + 1), { status: 206, headers: { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Length': String(end - start + 1), 'Accept-Ranges': 'bytes' } });
 }
-async function cacheOnlyIfDownloaded(req) {   // encrypted premium files: never duplicated into the shell cache
+async function cacheOnlyIfDownloaded(req) {
   const hit = await (await caches.open(MEDIA)).match(req, { ignoreSearch: true });
   return hit || fetch(req);
 }

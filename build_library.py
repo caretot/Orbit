@@ -8,12 +8,13 @@ Runs automatically on GitHub (see .github/workflows) or locally:  python build_l
 Everything about a song comes from its FILE NAME:
 
     Song-Name_Artist-Name_day_month_year_Genre.mp3
+    Song-Name_Artist-Name_day_month_year_Genre_E.mp3     <- "_E" at the end = explicit
     Bomba-Xeyallar_Fuad-Ildarov_4_November_2025_Pop.mp3
       -> title "Bomba Xeyallar", artist "Fuad Ildarov", released 4 November 2025, genre "Pop"
 
   * "_" separates the parts, "-" becomes a space, "--" becomes a real hyphen.
   * Several artists: join them with "&"   e.g.  Song_Artist-One&Artist-Two_1_May_2026_Rap
-  * Shorter forms also work:  Song_Artist   /   Song_Artist_2026   /   Song_Artist_2026_Pop
+  * Shorter forms also work:  Song_Artist   /   Song_Artist_2026   /   Song_Artist_2026_Pop_E
   * Month: January..December, Jan..Dec, 1..12 or Azerbaijani (Yanvar..Dekabr).
 
 Images (same name, .jpg/.png/.webp):
@@ -33,8 +34,8 @@ IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
 MONTHS = {}
 for i, names in enumerate([
     ("january", "jan", "yanvar"), ("february", "feb", "fevral"), ("march", "mar", "mart"),
-    ("april", "apr", "aprel"), ("may", "may"), ("june", "jun", "iyun", "i̇yun"),
-    ("july", "jul", "iyul", "i̇yul"), ("august", "aug", "avqust"), ("september", "sep", "sept", "sentyabr"),
+    ("april", "apr", "aprel"), ("may", "may"), ("june", "jun", "iyun"),
+    ("july", "jul", "iyul"), ("august", "aug", "avqust"), ("september", "sep", "sept", "sentyabr"),
     ("october", "oct", "oktyabr"), ("november", "nov", "noyabr"), ("december", "dec", "dekabr")], 1):
     for n in names:
         MONTHS[n] = i
@@ -54,7 +55,6 @@ def rel(path):
 
 
 def key(s):
-    """loose matching key: case/accents/-/_/spaces ignored"""
     s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9]+", "", s)
 
@@ -70,14 +70,18 @@ def words(part):
 
 
 def parse_name(stem):
-    """returns dict(title, artists, year, date, dateText, genre) or None"""
-    parts = [p for p in stem.split("_")]
+    """returns dict(title, artists, year, date, dateText, genre, explicit) or None"""
+    parts = stem.split("_")
+    explicit = False
+    if len(parts) >= 3 and parts[-1].strip().upper() == "E":
+        explicit = True
+        parts = parts[:-1]
     if len(parts) < 2:
         m = re.match(r"^(.+?) - (.+?)(?:\s*[\(\[]((?:19|20)\d{2})[\)\]])?$", stem)  # legacy "Artist - Title (2026)"
         if not m:
             return None
         return dict(title=m.group(2).strip(), artists=[a.strip() for a in re.split(r"\s*(?:,|&)\s*", m.group(1)) if a.strip()],
-                    year=int(m.group(3)) if m.group(3) else None, date=None, dateText=m.group(3), genre=None)
+                    year=int(m.group(3)) if m.group(3) else None, date=None, dateText=m.group(3), genre=None, explicit=False)
     title, artist, rest = words(parts[0]), parts[1], parts[2:]
     artists = [words(a) for a in re.split(r"[&+,]", artist) if words(a)] or ["Unknown artist"]
     year = date = text = genre = None
@@ -85,11 +89,10 @@ def parse_name(stem):
         d = int(rest[0]); mo = MONTHS.get(rest[1].lower()) or (int(rest[1]) if rest[1].isdigit() else None); y = int(rest[2])
         if mo and 1 <= mo <= 12 and 1 <= d <= 31:
             year, date, text = y, f"{y:04d}-{mo:02d}-{d:02d}", f"{d} {MONTH_NAMES[mo - 1]} {y}"
-            rest = rest[3:]
         else:
             warnings.append(f'Could not read the date in "{stem}"')
-            rest = rest[3:]
-    elif len(rest) >= 2 and rest[1].isdigit() and len(rest[1]) == 4 and MONTHS.get(rest[0].lower()):  # month_year
+        rest = rest[3:]
+    elif len(rest) >= 2 and rest[1].isdigit() and len(rest[1]) == 4 and MONTHS.get(rest[0].lower()):
         mo, y = MONTHS[rest[0].lower()], int(rest[1])
         year, date, text = y, f"{y:04d}-{mo:02d}-01", f"{MONTH_NAMES[mo - 1]} {y}"
         rest = rest[2:]
@@ -98,7 +101,7 @@ def parse_name(stem):
         rest = rest[1:]
     if rest:
         genre = words(" ".join(rest))
-    return dict(title=title, artists=artists, year=year, date=date, dateText=text, genre=genre)
+    return dict(title=title, artists=artists, year=year, date=date, dateText=text, genre=genre, explicit=explicit)
 
 
 def git_added_date(path):
@@ -158,7 +161,7 @@ def build_songs():
             info = parse_name(stem)
             if not info:
                 warnings.append(f'Name not in the expected format, used as title only: "{fn}"')
-                info = dict(title=words(stem), artists=["Unknown artist"], year=None, date=None, dateText=None, genre=None)
+                info = dict(title=words(stem), artists=["Unknown artist"], year=None, date=None, dateText=None, genre=None, explicit=False)
             lyr = D("LYR", stem + ".txt")
             songs.append({
                 "id": uid("s", rel(path)),
@@ -170,6 +173,7 @@ def build_songs():
                 "date": info["date"],
                 "dateText": info["dateText"],
                 "genre": info["genre"],
+                "explicit": info["explicit"],
                 "duration": duration(path),
                 "added": file_date(path),
                 "cover": song_covers.get(key(stem)),
@@ -192,7 +196,7 @@ def build_artists(songs):
 
 def build_playlists(songs):
     covers = image_index(D("COVERS", "playlists"))
-    covers.update({k: v for k, v in image_index(D("PLAYLISTS")).items()})
+    covers.update(image_index(D("PLAYLISTS")))
     by = {}
     for s in songs:
         for k in (s["_stem"], s["file"], os.path.basename(s["file"]), s["title"], f'{s["title"]} {s["artist"]}'):
@@ -255,7 +259,8 @@ def main():
     with open(D("library.js"), "w", encoding="utf-8") as f:
         f.write("/* AUTO-GENERATED by build_library.py - do not edit by hand */\n")
         f.write("window.LIBRARY = " + json.dumps(data, ensure_ascii=False, indent=1) + ";\n")
-    print(f"library.js written: {len(songs)} songs, {len(artists)} artist photos, {len(playlists)} playlists")
+    print(f"library.js written: {len(songs)} songs ({sum(s['explicit'] for s in songs)} explicit), "
+          f"{len(artists)} artist photos, {len(playlists)} playlists")
     for w in warnings:
         print("WARNING:", w)
 
