@@ -2,5 +2,4 @@
 # description: AZE and Turkish style boom stlyes
 # section: HBPM
 # created: 2026-10-17
-artist: Suno
-CRİ-İQ_Suno_17_October_2026_Hip-Hop
+CRİ-İQ_Suno_17_October_2026_HipHop
