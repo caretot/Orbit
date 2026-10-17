@@ -1,0 +1,12 @@
+/* ORBIT - keeps the top bar (close / title / share) of the Lyrics and Queue
+   screens fixed at the top while you scroll. */
+.overlay .o-inner { padding-top: 0; }
+.overlay .o-top {
+  position: sticky; top: 0; z-index: 5;
+  margin: 0 -20px 14px;
+  padding: calc(var(--safe-t) + 8px) 20px 10px;
+  background: var(--bg);
+  box-shadow: 0 10px 14px -10px rgba(0, 0, 0, .45);
+}
+.overlay.lyrics .o-top { background: color-mix(in srgb, var(--tint, var(--tint-0)) 80%, #000); }
+[data-theme="light"] .overlay.lyrics .o-top { background: color-mix(in srgb, var(--tint, var(--tint-0)) 25%, var(--bg)); }
